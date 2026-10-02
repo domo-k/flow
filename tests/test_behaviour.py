@@ -19,6 +19,16 @@ def step(fn):
     return fn
 
 
+def buttons(widget):
+    """Flow's pill buttons inside a window, in order."""
+    found = []
+    for child in widget.winfo_children():
+        if isinstance(child, m.PillButton):
+            found.append(child)
+        found += buttons(child)
+    return found
+
+
 @step
 def session_cycle():
     m.FAKE_IDLE[0] = 1.0
@@ -358,10 +368,32 @@ def stand_ups():
     app.close_toast()
     m.FAKE_IDLE[0] = 1.0
     app.cfg["use_activity"] = True
+    app.state = "working"
     app.sit_elapsed = 600
-    m.FAKE_IDLE[0] = app.minutes("stand_for_minutes") * 60 + 5
+    m.FAKE_IDLE[0] = app.minutes("stand_for_minutes") * 60 + 5  # a couple of minutes reading, no input
     tick(app)
-    check("stand-up (watching): being away from the keyboard counts as standing", app.sit_elapsed == 0)
+    check("stand-up (watching): a short quiet spell doesn't silently reset sitting", app.sit_elapsed > 600)
+    m.FAKE_IDLE[0] = app.minutes("idle_reset_minutes") * 60 + 5  # a long quiet spell...
+    tick(app)
+    m.FAKE_IDLE[0] = 1.0  # ...then back: Flow asks, and "It was a break" means you got up
+    tick(app)
+    check("stand-up (watching): back after a long quiet spell, Flow asks", app.toast is not None)
+    buttons(app.toast.win)[0].command()  # "It was a break"
+    check("stand-up (watching): 'It was a break' resets the sitting clock", app.sit_elapsed == 0)
+    app.close_toast()
+    app.sit_elapsed = 600
+    tick(app, gap=app.minutes("idle_reset_minutes") * 60 + 5)  # laptop slept
+    check("stand-up (watching): a laptop sleep isn't counted as sitting",
+          app.sit_elapsed < 2 and not app.stand_open())
+    app.cfg["use_activity"] = False
+    app.sit_elapsed, app.work_elapsed = 600, 600
+    tick(app, gap=1200)  # 20-minute sleep while studying on another device: keeps running
+    check("stand-up (keep-running): a short sleep keeps both clocks running",
+          app.sit_elapsed >= 1799 and app.work_elapsed >= 1799)
+    tick(app, gap=8 * 3600)  # overnight
+    check("stand-up (keep-running): overnight starts fresh, no break screen or stand-up card",
+          app.state == "working" and app.work_elapsed < 2 and app.sit_elapsed < 2 and not app.stand_open())
+    app.cfg["use_activity"] = True
     m.FAKE_IDLE[0] = 1.0
     app.handle("stand_now")
     check("stand-up: 'Stand up now' starts the countdown straight away",

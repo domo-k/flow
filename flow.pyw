@@ -34,6 +34,23 @@ import pystray
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageGrab, ImageOps, ImageTk
 
 FROZEN = getattr(sys, "frozen", False)  # running as Flow.exe
+
+_tk_after = tk.Misc.after
+
+
+def _after_on_root(self, ms, func=None, *args):
+    """Schedule every timer on the main window, which lives as long as Flow does.
+
+    tkinter deletes a window's callbacks when the window closes. A timer still queued for a closed
+    window could then fire into a newer callback that reused the same internal name (an error at
+    best, the wrong action at worst). Callbacks check their window still exists before acting.
+    """
+    return _tk_after(self._root(), ms, func, *args)
+
+
+tk.Misc.after = _after_on_root
+_tk_after_cancel = tk.Misc.after_cancel
+tk.Misc.after_cancel = lambda self, timer: _tk_after_cancel(self._root(), timer)  # same window as after()
 # Settings and stats live in %APPDATA%\Flow, so the exe can sit anywhere.
 DATA_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Flow")
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
@@ -2278,7 +2295,7 @@ class SettingsWindow:
         self.saved.config(text="✓  Saved")
         if getattr(self, "_saved_timer", None):
             self.win.after_cancel(self._saved_timer)
-        self._saved_timer = self.win.after(2500, lambda: self.saved.config(text=""))
+        self._saved_timer = self.win.after(2500, lambda: self.saved.winfo_exists() and self.saved.config(text=""))
 
     # -- appearance page
 
@@ -3280,6 +3297,7 @@ class App:
 
         def was_break():
             self.reset_work()
+            self.reset_sitting()
             self.toast = Toast(self.root, "Fresh session started",
                                f"Next break in {fmt_num(self.minutes('work_minutes'))} min.", seconds=5)
 
@@ -3363,6 +3381,12 @@ class App:
         if self.stand_open():
             self.stand.show_done(self.minutes("stand_every_minutes"))
         chime(float(self.cfg["chime_volume"]))
+
+    def reset_sitting(self):
+        """You got up some other way (a break, the laptop slept): the sitting clock starts again."""
+        self.bump("longest_sitting_minutes", round(self.sit_elapsed / 60), mode="max")
+        self.sit_elapsed = 0.0
+        self.close_stand()
 
     def stand_snooze(self, minutes):
         self.close_stand()
@@ -3520,6 +3544,13 @@ class App:
         if self.state == "waiting" and self.welcome_again_at and now >= self.welcome_again_at:
             self.show_welcome()
 
+        long_sleep = gap >= max(2 * self.minutes("work_minutes") * 60, 3600)
+        if self.state == "working" and not self.cfg["use_activity"] and long_sleep:
+            # Laptop was off far longer than a session (e.g. overnight): start fresh rather than
+            # opening to a break screen. Shorter sleeps keep running, for studying on another device.
+            self.reset_work()
+            self.reset_sitting()
+            gap = 0.0
         if self.state == "working" and not self.cfg["use_activity"]:
             self.work_elapsed += gap  # always running: no quiet-spell or sleep resets
             self.check_break_due(now)
@@ -3527,6 +3558,8 @@ class App:
             if gap >= idle_reset:
                 # The laptop was asleep: that was a break for sure.
                 self.reset_work()
+                self.reset_sitting()
+                gap = 0.0
             else:
                 # No input for a while might be a break, or reading / watching a lecture.
                 # Keep counting, and ask when they're back rather than guessing.
@@ -3563,10 +3596,9 @@ class App:
 
         # Sitting clock: runs while you're working, stops while you're on your feet.
         if self.state == "working" and not (self.stand_open() and self.stand.phase in ("moving", "done")):
-            if self.cfg["use_activity"] and idle >= self.minutes("stand_for_minutes") * 60:
-                self.sit_elapsed = 0.0  # away from the keyboard long enough: you got up
-            else:
-                self.sit_elapsed += gap
+            # No input doesn't mean you stood up (reading, lectures, the iPad). After a long quiet
+            # spell Flow asks "Was that a break?", and "It was a break" resets this clock.
+            self.sit_elapsed += gap
             self.check_stand_due(now)
         elif self.state != "working":
             self.close_stand()
