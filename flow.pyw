@@ -821,6 +821,8 @@ def gradient_arc(d, box, frac, colors, width, caps=True):
     if frac <= 0.004:
         return
     frac = min(frac, 1.0)
+    if frac >= 0.998 and len(colors) > 1 and colors[0] != colors[-1]:
+        colors = colors + [colors[0]]  # closed ring: blend the end back into the start
     x0, y0, x1, y1 = box
     c, rc = (x0 + x1) / 2, (x1 - x0) / 2 - width / 2
     if len(colors) == 1:
@@ -886,7 +888,7 @@ def ring_mark(size, frac, colors, center=None, bg=None, track=(125, 135, 147, 11
 def badge_image(size, color=None, bg=None):
     """Small mark used on cards and popups. color=None uses the theme gradient."""
     colors = color if color else list(THEME.stops)
-    return orient(ring_mark(size, 0.74, colors, bg=bg, track=SURFACE_2 if bg else (125, 135, 147, 110)))
+    return ring_mark(size, 1.0, colors, bg=bg, track=SURFACE_2 if bg else (125, 135, 147, 110))
 
 
 def app_logo(size):
@@ -904,8 +906,8 @@ def app_logo(size):
     ImageDraw.Draw(img).rounded_rectangle((6, 6, S - 6, S - 6), radius=60, outline="#2c3440", width=3)
     small = size <= 32
     r = 214 if small else 190  # bolder ring at tiny sizes so it stays readable
-    ring = orient(ring_mark(r, 0.76, list(THEME.stops), track="#242b35",
-                            stroke=46 if small else 30, glow=not small, tip=not small))
+    ring = orient(ring_mark(r, 1.0, list(THEME.stops), track="#242b35",
+                            stroke=46 if small else 30, glow=not small))
     img.alpha_composite(ring, ((S - r) // 2, (S - r) // 2))
     return img.resize((size, size), Image.LANCZOS)
 
@@ -1345,7 +1347,7 @@ class Toast:
 
     def _draw_badge(self):
         colors = [self.tone] if self.tone else TRAY_FX.ring_colors()
-        img = orient(ring_mark(px(36), 0.74, colors, bg=SURFACE, track=SURFACE_2))
+        img = ring_mark(px(36), 1.0, colors, bg=SURFACE, track=SURFACE_2)
         self.badge_img = ImageTk.PhotoImage(img)
         self.badge.itemconfig(self.badge_item, image=self.badge_img)
 
@@ -2197,7 +2199,7 @@ class SettingsWindow:
             cv.img = ImageTk.PhotoImage(swatch_image(px(32), stops, name == self.pending["theme"]))
             cv.itemconfig(cv.item, image=cv.img)
         # Still preview of the chosen colours (the mark used on Flow's windows and icon).
-        img = ring_mark(px(56), 0.76, list(Theme(self.pending).stops), track=SURFACE_2, glow=True, tip=True,
+        img = ring_mark(px(56), 1.0, list(Theme(self.pending).stops), track=SURFACE_2, glow=True,
                         bg=SURFACE)
         self.logo_preview.img = ImageTk.PhotoImage(img)
         self.logo_preview.itemconfig(self.logo_item, image=self.logo_preview.img)
