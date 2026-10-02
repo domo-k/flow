@@ -46,8 +46,8 @@ you're away from the keyboard and mouse**. The only way through a break is to ge
   <img src="docs/stats.png" width="400" alt="Weekly stats">
 </p>
 <p align="center"><img src="docs/settings-appearance.png" width="560" alt="Appearance settings"></p>
-<p align="center"><img src="docs/break-screen.png" width="560" alt="Break screen (web demo)"><br>
-<sub>Break screen, captured from the web demo.</sub></p>
+<p align="center"><img src="docs/break-screen.png" width="560" alt="Break screen"><br>
+<sub>The break screen: a glowing frame around every monitor, counting down only while you're away.</sub></p>
 
 ## How it works
 
