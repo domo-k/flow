@@ -295,6 +295,81 @@ def open_windows_follow_theme():
 
 
 @step
+def stand_ups():
+    """Stand-up reminders: a sitting clock separate from the session, with its own card."""
+    for use_activity in (False, True):
+        app.cfg.update(use_activity=use_activity, stand_reminders=True)
+        tag = "keep-running" if not use_activity else "watching"
+        app.close_stand()
+        app.state = "working"
+        app.reset_work()
+        app.sit_elapsed = 0.0
+        app.stand_snooze_until = app.snooze_until = 0.0
+        m.FAKE_IDLE[0] = 4 * 3600.0 if not use_activity else 1.0
+        every = app.minutes("stand_every_minutes") * 60
+        app.sit_elapsed = every - 1.5
+        tick(app)
+        check(f"stand-up ({tag}): no card before it's due", not app.stand_open())
+        tick(app, 2)
+        check(f"stand-up ({tag}): card appears after sitting {every / 60:.0f} min",
+              app.stand_open() and app.stand.phase == "ask")
+        check(f"stand-up ({tag}): the focus session keeps running", app.state == "working")
+        session = app.work_elapsed
+        app.stand_next_nudge = time.monotonic()
+        tick(app)
+        check(f"stand-up ({tag}): ignored card asks again, firmer", app.stand.level == 1 and app.stand_nudges == 1)
+        app.stand_up()
+        check(f"stand-up ({tag}): 'I'm up' starts the on-your-feet countdown", app.stand.phase == "moving")
+        sat = app.sit_elapsed
+        tick(app, 3)
+        check(f"stand-up ({tag}): sitting clock stops while you're moving", app.sit_elapsed == sat)
+        check(f"stand-up ({tag}): session time still counts", app.work_elapsed > session)
+        app.stand.ends = time.monotonic() - 0.1
+        app.stand._run_clock()
+        check(f"stand-up ({tag}): finishing resets the sitting clock", app.sit_elapsed == 0
+              and app.stand.phase == "done")
+    day = app.stats[m.datetime.date.today().isoformat()]
+    check("stand-up: counted in stats", day.get("stand_ups", 0) >= 2, str(day))
+
+    app.close_stand()
+    app.sit_elapsed = every + 5
+    app.stand_snooze(5)
+    tick(app)
+    check("stand-up: '5 more min' holds it back", not app.stand_open())
+    app.stand_snooze_until = 0.0
+    app.handle("snooze", 60)  # meeting mode
+    tick(app)
+    check("stand-up: meeting mode holds it back", not app.stand_open())
+    app.snooze_until = 0.0
+    app.work_elapsed = app.minutes("work_minutes") * 60 - 120  # break due in 2 min
+    tick(app)
+    check("stand-up: skipped when a screen break is about to start", not app.stand_open())
+    app.work_elapsed = 0.0
+    app.cfg["stand_reminders"] = False
+    tick(app)
+    check("stand-up: off means no card", not app.stand_open())
+    app.cfg["stand_reminders"] = True
+    tick(app)
+    check("stand-up: back on, the card shows", app.stand_open())
+    app.start_break()
+    check("stand-up: a screen break closes the card and counts as standing",
+          not app.stand_open() and app.sit_elapsed == 0)
+    app.end_break(skipped=True)
+    app.close_toast()
+    m.FAKE_IDLE[0] = 1.0
+    app.cfg["use_activity"] = True
+    app.sit_elapsed = 600
+    m.FAKE_IDLE[0] = app.minutes("stand_for_minutes") * 60 + 5
+    tick(app)
+    check("stand-up (watching): being away from the keyboard counts as standing", app.sit_elapsed == 0)
+    m.FAKE_IDLE[0] = 1.0
+    app.handle("stand_now")
+    check("stand-up: 'Stand up now' starts the countdown straight away",
+          app.stand_open() and app.stand.phase == "moving")
+    app.close_stand()
+
+
+@step
 def migration():
     old = {"effect": "Gradient", "effect_speed": "Fast", "fx_tray": False, "fx_break": True,
            "border_style": "Breathe"}

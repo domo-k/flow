@@ -51,6 +51,12 @@ def migrate_data():
 DEFAULTS = {
     "work_minutes": 50,
     "break_minutes": 10,
+    # Stand-up reminders: get out of the chair every so often, even mid-session. Not a screen break:
+    # a card asks you to move for a couple of minutes and your session keeps going.
+    "stand_reminders": True,
+    "stand_every_minutes": 30,
+    "stand_for_minutes": 2,
+    "stand_renudge_minutes": 3,   # ask again this often if the card is ignored
     "warn_minutes_before": 5,
     # Away from the computer this long while working = you already took a break; timer resets.
     "idle_reset_minutes": 5,
@@ -114,6 +120,24 @@ NUDGES = [
     ("Let's go", "{over} min past your break. A short push now beats a long catch-up later."),
     ("Come back", "Rest is done. Momentum starts the moment you sit down."),
 ]
+# Stand-up card: something to do on your feet, and firmer wording each time it's ignored.
+MOVES = [
+    "Walk to the kitchen and get a glass of water.",
+    "Do 10 slow calf raises.",
+    "Walk around the room a couple of times.",
+    "Reach both arms overhead and hold for five slow breaths.",
+    "Do 10 bodyweight squats.",
+    "Roll your shoulders back ten times, standing tall.",
+    "Lunge forward and stretch your hips, 20 seconds each side.",
+    "Pace the hallway, or take the stairs once.",
+    "Touch your toes slowly, then roll back up.",
+    "Step outside or stand by a window for some fresh air.",
+]
+STAND_NUDGES = [
+    ("Time to stand up", "You've been sitting for {sat} min."),
+    ("Still sitting?", "{sat} min in the chair. Two minutes on your feet makes a real difference."),
+    ("Up you get", "{sat} min of sitting. Your back and legs will thank you."),
+]
 PRESETS = {
     "Pomodoro  25 / 5": (25, 5),
     "Standard  50 / 10": (50, 10),
@@ -153,7 +177,7 @@ SPEEDS = {"Slow": 30.0, "Medium": 12.0, "Fast": 5.0}  # seconds per colour cycle
 WINDOW_ANIMS = ("Slide", "Fade", "None")
 RING_DIRECTIONS = ("Clockwise", "Counter-clockwise")
 # Animated elements: (settings key prefix, name shown in Settings, effects it offers)
-GLYPH = {"panel": "", "break": "", "pause": "", "play": "", "meeting": "",
+GLYPH = {"panel": "", "break": "", "stand": "", "pause": "", "play": "", "meeting": "",
          "reset": "", "settings": "", "stats": "", "quit": "", "close": "",
          "schedule": "", "back": "", "appearance": "", "general": ""}
 FX_ELEMENTS = (("tray", "Tray icon", EFFECTS[1:]),
@@ -303,6 +327,7 @@ class Motion:
 
 THEME = Theme({})
 TRAY_FX = PANEL_FX = BREAK_FX = Motion("Flow", "Slow")
+STATIC_FX = Motion("Static", "Slow")
 ANIM, CCW = "Slide", True
 
 
@@ -1478,6 +1503,136 @@ class WelcomeWindow:
         self.app.welcome_done(choice, goal)
 
 
+class StandPrompt:
+    """Card in the middle of the screen asking you to get out of the chair for a couple of minutes.
+    It isn't a screen break: your focus session keeps running. Phases: ask -> moving -> done."""
+
+    def __init__(self, app, moving=False):
+        self.app = app
+        self.level = 0
+        self.move = random.choice(MOVES)
+        self.win = w = hidden_toplevel(app.root)
+        w.overrideredirect(True)
+        w.attributes("-topmost", True)
+        w.configure(bg=SURFACE)
+        self.W = px(400)
+        self.body = tk.Frame(w, bg=SURFACE, padx=px(28), pady=px(24))
+        self.body.pack(fill="both")
+        self.phase = None
+        self.show_moving() if moving else self.show_ask()
+        style_window(w, border=BORDER)
+        self.edge = EdgeGlow(w, lambda: PANEL_FX if PANEL_FX.effect != "Off" else STATIC_FX, bg=SURFACE)
+        x, y = self._spot()
+        animate_in(w, x, y, rise=px(20), ms=300)
+
+    def _spot(self):
+        self.win.update_idletasks()
+        left, top, right, bottom = work_area()
+        w, h = self.win.winfo_reqwidth(), self.win.winfo_reqheight()
+        return left + (right - left - w) // 2, top + (bottom - top - h) // 2
+
+    def _reset(self):
+        for child in self.body.winfo_children():
+            child.destroy()
+        tk.Frame(self.body, bg=SURFACE, width=self.W - px(56), height=0).pack()  # steady width
+
+    def _place(self):
+        if self.win.winfo_exists() and self.phase:
+            x, y = self._spot()
+            self.win.geometry(f"+{x}+{y}")
+
+    def _eyebrow(self, text, color):
+        top = tk.Frame(self.body, bg=SURFACE)
+        top.pack(fill="x")
+        tk.Label(top, text=GLYPH["stand"], font=font("icons", 16), fg=color, bg=SURFACE).pack(side="left")
+        tk.Label(top, text=spaced(text), font=font("text_semibold", 8), fg=color, bg=SURFACE).pack(
+            side="left", padx=(px(10), 0))
+
+    def _suggestion(self):
+        quote = tk.Frame(self.body, bg=SURFACE)
+        quote.pack(fill="x", pady=(px(16), 0))
+        tk.Frame(quote, bg=ACCENT, width=px(3)).pack(side="left", fill="y")
+        tk.Label(quote, text=self.move, font=font("text", 10), fg=FG, bg=SURFACE, anchor="w", justify="left",
+                 wraplength=self.W - px(90)).pack(side="left", padx=(px(12), 0))
+
+    def show_ask(self):
+        self.phase = "ask"
+        self._reset()
+        sat = max(1, round(self.app.sit_elapsed / 60))
+        title, sub = STAND_NUDGES[min(self.level, len(STAND_NUDGES) - 1)]
+        color = WARN if self.level else ACCENT
+        self._eyebrow("Stand-up", color)
+        tk.Label(self.body, text=title, font=font("display", 22), fg=FG, bg=SURFACE, anchor="w").pack(
+            fill="x", pady=(px(14), 0))
+        tk.Label(self.body, text=sub.format(sat=sat), font=font("text", 11), fg=MUTED, bg=SURFACE, anchor="w",
+                 justify="left", wraplength=self.W - px(56)).pack(fill="x")
+        self._suggestion()
+        row = tk.Frame(self.body, bg=SURFACE)
+        row.pack(fill="x", pady=(px(22), 0))
+        PillButton(row, "I'm up", self.app.stand_up, kind="primary", width=130, height=40, size=11).pack(side="left")
+        PillButton(row, "5 more min", lambda: self.app.stand_snooze(5), height=40).pack(side="left", padx=(px(8), 0))
+        tk.Label(self.body, text="In a meeting? Meeting mode in the tray menu holds these back.",
+                 font=font("text", 8), fg=FAINT, bg=SURFACE, anchor="w").pack(fill="x", pady=(px(14), 0))
+        self._place()
+
+    def show_moving(self):
+        self.phase = "moving"
+        self._reset()
+        self.total = self.app.minutes("stand_for_minutes") * 60
+        self.ends = time.monotonic() + self.total
+        self._eyebrow("On your feet", ACCENT)
+        self.clock = tk.Label(self.body, text=fmt_clock(self.total), font=font("display_light", 40), fg=FG,
+                              bg=SURFACE, anchor="w")
+        self.clock.pack(fill="x", pady=(px(8), 0))
+        self.bar_w, self.bar_h = self.W - px(56), max(3, px(5))
+        self.bar = tk.Canvas(self.body, width=self.bar_w, height=self.bar_h, bg=SURFACE, highlightthickness=0)
+        self.bar.pack(anchor="w", pady=(px(4), 0))
+        self.bar_item = self.bar.create_image(0, 0, anchor="nw")
+        tk.Label(self.body, text="Keep moving. Flow will chime when you can sit back down.", font=font("text", 10),
+                 fg=MUTED, bg=SURFACE, anchor="w", justify="left", wraplength=self.W - px(56)).pack(
+            fill="x", pady=(px(12), 0))
+        self._suggestion()
+        row = tk.Frame(self.body, bg=SURFACE)
+        row.pack(fill="x", pady=(px(20), 0))
+        PillButton(row, "I'm done", lambda: self.app.stand_done(), height=36, size=10).pack(side="left")
+        self._place()
+        self._run_clock()
+
+    def _run_clock(self):
+        if not self.win.winfo_exists() or self.phase != "moving":
+            return
+        left = self.ends - time.monotonic()
+        if left <= 0:
+            return self.app.stand_done()
+        self.clock.config(text=fmt_clock(left))
+        img = orient(bar_image(self.bar_w, self.bar_h, left / self.total, list(THEME.stops), SURFACE))
+        self.bar_img = ImageTk.PhotoImage(img)
+        self.bar.itemconfig(self.bar_item, image=self.bar_img)
+        self.win.after(200, self._run_clock)
+
+    def show_done(self, every):
+        self.phase = "done"
+        self._reset()
+        self._eyebrow("Nice work", ACCENT)
+        tk.Label(self.body, text="Back to it.", font=font("display", 22), fg=FG, bg=SURFACE, anchor="w").pack(
+            fill="x", pady=(px(14), 0))
+        tk.Label(self.body, text=f"Next stand-up in {fmt_num(every)} min.", font=font("text", 11), fg=MUTED,
+                 bg=SURFACE, anchor="w").pack(fill="x")
+        self._place()
+        self.win.after(2500, self.destroy)
+
+    def renudge(self):
+        """Ignored for a while: ask again, a bit firmer, and bring the card back to the front."""
+        self.level += 1
+        self.show_ask()
+        self.win.lift()
+        self.win.attributes("-topmost", True)
+
+    def destroy(self):
+        if self.win.winfo_exists():
+            self.win.destroy()
+
+
 _CreateIconFromResourceEx = user32.CreateIconFromResourceEx
 _CreateIconFromResourceEx.restype = ctypes.c_void_p
 _CreateIconFromResourceEx.argtypes = [ctypes.c_char_p, ctypes.c_uint, ctypes.c_int, ctypes.c_uint,
@@ -1581,6 +1736,9 @@ class TrayMenu:
             row(GLYPH["play"], "Resume", ("resume",), hint=a.status_text().replace("Paused: ", "").replace("Paused", ""))
         elif a.state != "break":
             chips("Pause", GLYPH["pause"], [("15m", 15), ("30m", 30), ("1h", 60), ("∞", None)], cmd=("pause",))
+        if a.state == "working":
+            row(GLYPH["stand"], "Stand up now", ("stand_now",),
+                hint=f"in {max(1, math.ceil(a.time_to_stand() / 60))} min" if a.cfg["stand_reminders"] else "")
         if a.state != "break":
             row(GLYPH["break"], "Take a break now", ("break_now",))
         row(GLYPH["meeting"], "Meeting mode", ("snooze", 60), hint="1 hour")
@@ -1740,6 +1898,17 @@ class SessionPanel:
         self.sub = tk.Label(b, font=font("text", 9), fg=MUTED, bg=SURFACE, anchor="w", justify="left",
                             wraplength=self.bar_w)
         self.sub.pack(fill="x", pady=(px(10), 0))
+        self.stand_lbl = None
+        if a.cfg["stand_reminders"] and mode in ("running", "snoozed"):
+            line = tk.Frame(b, bg=SURFACE)
+            line.pack(fill="x", pady=(px(8), 0))
+            tk.Label(line, text=GLYPH["stand"], font=font("icons", 10), fg=MUTED, bg=SURFACE).pack(side="left")
+            self.stand_lbl = tk.Label(line, font=font("text", 9), fg=MUTED, bg=SURFACE, anchor="w")
+            self.stand_lbl.pack(side="left", padx=(px(6), 0))
+            stand = tk.Label(line, text="Stand up now", font=font("text_semibold", 9), fg=ACCENT, bg=SURFACE,
+                             cursor="hand2")
+            stand.pack(side="right")
+            stand.bind("<ButtonRelease-1>", lambda e: (self.close(), a.handle("stand_now")))
         if a.cfg["goal"]:
             focus = tk.Frame(b, bg=SURFACE)
             focus.pack(fill="x", pady=(px(12), 0))
@@ -1800,6 +1969,12 @@ class SessionPanel:
         self.status.config(text=status, fg=color)
         self.sub.config(text=sub)
         self.clock.config(text=fmt_clock(left))
+        if self.stand_lbl:
+            if a.stand_open():
+                self.stand_lbl.config(text="Time to stand up", fg=WARN)
+            else:
+                mins = max(1, math.ceil(a.time_to_stand() / 60))
+                self.stand_lbl.config(text=f"Stand up in {mins} min", fg=MUTED)
         # Slim bar shows the time left; redraw only when it visibly changes.
         colors = list(THEME.stops) if mode in ("running", "break") else [color if color != MUTED else IDLE]
         key = (round((1 - frac) * 400), tuple(colors))
@@ -1979,11 +2154,12 @@ class ColorPicker:
 
 
 class SettingsWindow:
-    PAGES = (("Schedule", "schedule"), ("Break", "break"), ("Back to work", "back"),
+    PAGES = (("Schedule", "schedule"), ("Stand up", "stand"), ("Break", "break"), ("Back to work", "back"),
              ("Appearance", "appearance"), ("General", "general"))
     TABS = tuple(name for name, _ in PAGES)
     PAGE_INFO = {
         "Schedule": "How long you focus, and how long you rest.",
+        "Stand up": "Get out of the chair regularly, even in the middle of a session.",
         "Break": "What happens on the break screen.",
         "Back to work": "Getting you back to your desk after a break.",
         "Appearance": "Colours and animations.",
@@ -2046,6 +2222,7 @@ class SettingsWindow:
         self.content.pack(fill="x", pady=(px(16), 0))
         self.pages = {name: tk.Frame(self.content, bg=BG) for name in self.TABS}
         self._schedule(self.pages["Schedule"], cfg)
+        self._stand(self.pages["Stand up"], cfg)
         self._break_screen(self.pages["Break"], cfg)
         self._back_to_work(self.pages["Back to work"], cfg)
         self._appearance(self.pages["Appearance"], cfg)
@@ -2379,6 +2556,24 @@ class SettingsWindow:
                  anchor="w", justify="left", wraplength=self.W - px(40)).pack(fill="x", pady=(px(14), 0))
         card.finish().pack()
 
+    def _stand(self, page, cfg):
+        card = Card(page, self.W)
+        b = card.body
+        section_label(b, "Stand-up reminders")
+        self.stand_on = setting_row(b, "Remind me to stand up",
+                                    "A card asks you to move for a moment. Your session keeps running.",
+                                    lambda p: Toggle(p, cfg["stand_reminders"]), first=True)
+        self.stand_every = setting_row(b, "Every", "How long you can sit before Flow asks.",
+                                       lambda p: Stepper(p, cfg["stand_every_minutes"], 10, 120, 5, "min"))
+        self.stand_for = setting_row(b, "Move for", "A short countdown while you're on your feet.",
+                                     lambda p: Stepper(p, cfg["stand_for_minutes"], 1, 10, 1, "min"))
+        self.stand_again = setting_row(b, "Ask again after", "If the card is ignored, it comes back firmer.",
+                                       lambda p: Stepper(p, cfg["stand_renudge_minutes"], 1, 15, 1, "min"))
+        tk.Label(b, text="Screen breaks count as standing up. No reminder shows when a break is less than "
+                         "5 minutes away, while paused, or in meeting mode.", font=font("text", 9), fg=FAINT,
+                 bg=SURFACE, anchor="w", justify="left", wraplength=self.W - px(40)).pack(fill="x", pady=(px(14), 0))
+        card.finish().pack()
+
     def _break_screen(self, page, cfg):
         card = Card(page, self.W)
         b = card.body
@@ -2482,6 +2677,10 @@ class SettingsWindow:
             break_minutes=self.brk.value,
             warn_minutes_before=min(self.warn.value, max(0, work - 1)),
             reset_break_on_input=self.reset.value,
+            stand_reminders=self.stand_on.value,
+            stand_every_minutes=self.stand_every.value,
+            stand_for_minutes=self.stand_for.value,
+            stand_renudge_minutes=self.stand_again.value,
             skip_phrase=self.phrase.get().strip() or DEFAULTS["skip_phrase"],
             chime_volume=self.volume.value,
             return_nudges=self.nudges.value,
@@ -2619,7 +2818,7 @@ class AdvancedWindow:
 
 
 class BarChart(tk.Canvas):
-    """Breaks taken per day, with a hover tooltip per bar."""
+    """Stand-ups per day, with a hover tooltip per bar."""
 
     def __init__(self, parent, days, rows, width, bg=SURFACE):
         self.days, self.rows, self.bg = days, rows, bg
@@ -2627,7 +2826,7 @@ class BarChart(tk.Canvas):
         super().__init__(parent, width=self.W, height=self.H, bg=bg, highlightthickness=0, bd=0)
         self.top, self.base = px(34), self.H - px(30)
         self.slot = self.W / len(days)
-        vals = [r.get("breaks_taken", 0) for r in rows]
+        vals = [r.get("stand_ups", 0) for r in rows]
         self.vmax = max(4, max(vals))
         self.vmax += self.vmax % 2  # even, so the midline lands on a whole number
 
@@ -2687,6 +2886,7 @@ class BarChart(tk.Canvas):
         r = self.rows[i]
         text = (f"{self.days[i]:%A %d %b}\n"
                 f"{r.get('breaks_taken', 0)} taken  ·  {r.get('breaks_skipped', 0)} skipped\n"
+                f"Stood up {r.get('stand_ups', 0)}x\n"
                 f"Longest sit {r.get('longest_sitting_minutes', 0)} min\n"
                 f"Back late {r.get('late_returns', 0)}x  ·  {r.get('minutes_over', 0)} min over")
         t = self.create_text(0, 0, text=text, fill=FG, font=font("text", 9), anchor="nw")
@@ -2737,16 +2937,17 @@ class StatsWindow:
         self.outer = outer = tk.Frame(w, bg=BG)
         if pack:
             outer.pack(padx=px(24), pady=(px(20), px(22)))
-        window_header(outer, "Your week", f"{days[0]:%d %b} – {today:%d %b %Y}")
+        window_header(outer, "Your week", f"{days[0]:%d %b} – {today:%d %b %Y}  ·  tiles show today")
 
         tiles = tk.Frame(outer, bg=BG)
         tiles.pack(fill="x", pady=(px(18), 0))
         gap = px(12)
-        tile_w = (W - 2 * gap) // 3
+        tile_w = (W - 3 * gap) // 4
         for i, (value, label) in enumerate((
-                (t.get("breaks_taken", 0), "Breaks taken today"),
-                (t.get("breaks_skipped", 0), "Skipped today"),
-                (f"{t.get('longest_sitting_minutes', 0)}m", "Longest sit today"))):
+                (t.get("stand_ups", 0), "Stand-ups"),
+                (t.get("breaks_taken", 0), "Breaks"),
+                (t.get("breaks_skipped", 0), "Skipped"),
+                (f"{t.get('longest_sitting_minutes', 0)}m", "Longest sit"))):
             card = Card(tiles, tile_w, pad=16)
             tk.Label(card.body, text=str(value), font=font("display", 22), fg=FG, bg=SURFACE,
                      anchor="w").pack(fill="x")
@@ -2755,7 +2956,7 @@ class StatsWindow:
             card.finish().pack(side="left", padx=(0 if i == 0 else gap, 0))
 
         card = Card(outer, W)
-        tk.Label(card.body, text="Breaks taken per day", font=font("text_semibold", 10), fg=FG,
+        tk.Label(card.body, text="Stand-ups per day", font=font("text_semibold", 10), fg=FG,
                  bg=SURFACE, anchor="w").pack(fill="x")
         tk.Label(card.body, text="Last 7 days. Hover a bar for details.", font=font("text", 9), fg=MUTED,
                  bg=SURFACE, anchor="w").pack(fill="x", pady=(0, px(10)))
@@ -2766,9 +2967,10 @@ class StatsWindow:
         skipped = sum(r.get("breaks_skipped", 0) for r in rows)
         on_time = sum(r.get("on_time_returns", 0) for r in rows)
         late = sum(r.get("late_returns", 0) for r in rows)
+        stood = sum(r.get("stand_ups", 0) for r in rows)
         foot = tk.Frame(outer, bg=BG)
         foot.pack(fill="x", pady=(px(16), 0))
-        tk.Label(foot, text=f"This week: {taken} taken · {skipped} skipped · "
+        tk.Label(foot, text=f"This week: stood up {stood}x · {taken} breaks · {skipped} skipped · "
                             f"back on time {on_time} of {on_time + late}",
                  font=font("text", 9), fg=MUTED, bg=BG).pack(side="left")
         PillButton(foot, "Close", w.destroy, bg=BG).pack(side="right")
@@ -2795,7 +2997,12 @@ class App:
         self.welcome_again_at = 0.0     # "Give me 5 min" -> ask again at this time
         self.last_wall = time.time()    # wall clock jumps when the laptop sleeps
         self.long_away = False
-        self.work_elapsed = 0.0         # seconds sitting since last break
+        self.work_elapsed = 0.0         # seconds into the current focus session
+        self.sit_elapsed = 0.0          # seconds sitting since you last stood up (stand-ups and breaks)
+        self.stand = None               # the stand-up card, while it's open
+        self.stand_snooze_until = 0.0
+        self.stand_next_nudge = 0.0
+        self.stand_nudges = 0
         self.break_ended_at = 0.0       # when "returning" started
         self.next_nudge = 0.0
         self.nudges_sent = 0
@@ -2847,6 +3054,11 @@ class App:
             if self.quitting:
                 return
         try:
+            if self.stand_open():
+                self.stand.edge.render()
+        except tk.TclError:
+            pass
+        try:
             if self.panel_open():
                 self.panel.edge.render()
                 if self.panel.mode == self.panel._mode():
@@ -2881,6 +3093,7 @@ class App:
     def minutes(self, key):
         if self.demo:
             return {"work_minutes": 1, "break_minutes": 1 / 3, "warn_minutes_before": 0.5,
+                    "stand_every_minutes": 0.5, "stand_for_minutes": 1 / 6, "stand_renudge_minutes": 0.25,
                     "idle_reset_minutes": 5, "return_grace_minutes": 0.25,
                     "return_nudge_every_minutes": 0.25}.get(key, float(self.cfg[key]))
         return float(self.cfg[key])
@@ -2932,6 +3145,13 @@ class App:
 
     # (The tray's right-click menu is Flow's own TrayMenu window; see handle("menu").)
 
+
+    def time_to_stand(self):
+        """Seconds until the next stand-up reminder (0 when it's due or showing)."""
+        left = self.minutes("stand_every_minutes") * 60 - self.sit_elapsed
+        if self.state == "working" and not self.stand_open():
+            left -= max(0.0, time.monotonic() - self.last_tick)
+        return max(0.0, left, self.stand_snooze_until - time.monotonic())
 
     def time_to_break(self):
         """Seconds until the break, counted live (not just at the last tick)."""
@@ -2994,6 +3214,9 @@ class App:
                 self.panel = SessionPanel(self)
         elif name == "reset":
             self.reset_work()
+        elif name == "stand_now" and self.state == "working":
+            self.close_stand()
+            self.stand = StandPrompt(self, moving=True)
         elif name == "preset":
             cfg = dict(self.cfg)
             cfg["work_minutes"], cfg["break_minutes"] = args
@@ -3081,6 +3304,54 @@ class App:
         if not self.panel_open():
             self.toast = Toast(self.root, "Back to it", f"Session resumed. {left} min until your break.", seconds=6)
 
+    # -- stand-ups
+
+    def stand_open(self):
+        return bool(self.stand and self.stand.win.winfo_exists())
+
+    def close_stand(self):
+        if self.stand:
+            self.stand.destroy()
+            self.stand = None
+
+    def check_stand_due(self, now):
+        """Ask you to stand up once you've sat long enough, unless something better is coming."""
+        if not self.cfg["stand_reminders"] or self.stand_open() or self.state != "working":
+            return
+        if now < self.stand_snooze_until or now < self.snooze_until:  # snoozed, or meeting mode
+            return
+        if self.sit_elapsed < self.minutes("stand_every_minutes") * 60:
+            return
+        if self.time_to_break() < 5 * 60:  # a screen break is about to get you up anyway
+            return
+        self.close_toast()
+        self.stand_nudges = 0
+        self.stand = StandPrompt(self)
+        self.stand_next_nudge = now + self.minutes("stand_renudge_minutes") * 60
+        chime(float(self.cfg["chime_volume"]))
+        self.phone("Time to stand up", f"You've been sitting for {round(self.sit_elapsed / 60)} min. "
+                                       "Get up and move for a couple of minutes.")
+
+    def stand_up(self):
+        """'I'm up': start the short on-your-feet countdown."""
+        if self.stand_open():
+            self.stand.show_moving()
+
+    def stand_done(self):
+        """Moved for long enough (or pressed 'I'm done'): sitting starts again from zero."""
+        self.bump("stand_ups")
+        self.bump("longest_sitting_minutes", round(self.sit_elapsed / 60), mode="max")
+        self.sit_elapsed = 0.0
+        self.stand_snooze_until = 0.0
+        if self.stand_open():
+            self.stand.show_done(self.minutes("stand_every_minutes"))
+        chime(float(self.cfg["chime_volume"]))
+
+    def stand_snooze(self, minutes):
+        self.close_stand()
+        self.stand_snooze_until = time.monotonic() + minutes * 60
+        self.bump("stand_snoozes")
+
     def panel_open(self):
         return bool(self.panel and self.panel.win.winfo_exists())
 
@@ -3092,7 +3363,9 @@ class App:
     def start_break(self):
         self.close_toast()
         self.quiet_since = 0.0
-        self.bump("longest_sitting_minutes", round(self.work_elapsed / 60), mode="max")
+        self.bump("longest_sitting_minutes", round(self.sit_elapsed / 60), mode="max")
+        self.sit_elapsed = 0.0
+        self.close_stand()
         self.state = "break"
         self.break_total = self.break_remaining = self.minutes("break_minutes") * 60
         self.overlay = BreakOverlay(self.root, self.cfg["skip_phrase"], clock_only=not self.cfg["use_activity"],
@@ -3151,6 +3424,7 @@ class App:
             self.state = "working"
             self.snooze_until = 0.0
             self.reset_work()
+            self.sit_elapsed = 0.0
             mins = fmt_num(self.minutes("work_minutes"))
             self.toast = Toast(self.root, "Session started",
                                f"Next break in {mins} min." + (f"\nFocus: {goal}" if goal else ""), seconds=6)
@@ -3269,6 +3543,24 @@ class App:
                 self.end_break(skipped=False)
             elif self.overlay:
                 self.overlay.update(self.break_remaining, self.break_total, away)
+
+        # Sitting clock: runs while you're working, stops while you're on your feet.
+        if self.state == "working" and not (self.stand_open() and self.stand.phase in ("moving", "done")):
+            if self.cfg["use_activity"] and idle >= self.minutes("stand_for_minutes") * 60:
+                self.sit_elapsed = 0.0  # away from the keyboard long enough: you got up
+            else:
+                self.sit_elapsed += gap
+            self.check_stand_due(now)
+        elif self.state != "working":
+            self.close_stand()
+        if self.stand_open() and self.stand.phase == "ask" and now >= self.stand_next_nudge:
+            self.stand_nudges += 1
+            self.stand.renudge()
+            self.stand_next_nudge = now + self.minutes("stand_renudge_minutes") * 60
+            if self.stand_nudges <= 5:
+                chime(float(self.cfg["chime_volume"]))
+                self.phone("Still sitting?", f"{round(self.sit_elapsed / 60)} min in the chair. Time to stand up.",
+                           priority=4 if self.stand_nudges >= 2 else 3)
 
         if self.panel and self.panel.win.winfo_exists():
             self.panel.refresh()

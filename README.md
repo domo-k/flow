@@ -19,6 +19,10 @@ you're away from the keyboard and mouse**. The only way through a break is to ge
 
 ## Features
 
+- **Stand-up reminders.** A separate sitting clock (every 30 min by default) brings up a card asking you to get
+  out of the chair, with a quick idea like "10 calf raises" and a short on-your-feet countdown. It isn't a screen
+  break: your session keeps running. Ignore it and it comes back firmer; snooze it, or use meeting mode during calls.
+  It stays quiet when a screen break is minutes away, and screen breaks count as standing up.
 - **Focus sessions** with presets (Pomodoro 25/5, Standard 50/10, Deep work 90/15) or your own lengths.
 - **Break screen** that covers all monitors and counts down only while you're away. Touching the computer pauses it
   (or, in strict mode, restarts it). An emergency skip phrase is available, and skips are recorded in your stats.
