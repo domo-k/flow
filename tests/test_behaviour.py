@@ -239,6 +239,43 @@ def settings_everything():
 
 
 @step
+def gradient_editor():
+    check("Sunset is golden hour to violet twilight",
+          m.THEMES["Sunset"] == ("#ffc56e", "#ff9248", "#e2552f", "#b5446e", "#5e3a8c"))
+    app.handle("settings")
+    sw = app.settings_win
+    sw.nav.select("Appearance")
+    sw.pick_theme("Ocean")
+    R.update()
+    base = list(m.THEMES["Ocean"])
+    sw._set_stops(base + ["#ffffff"])                       # what "+" then a colour does
+    check("gradient: + adds a colour", list(m.theme_stops(sw.pending)) == base + ["#ffffff"])
+    stops = list(m.theme_stops(sw.pending))
+    stops[0] = "#000000"
+    sw._set_stops(stops)                                    # what clicking a chip then a colour does
+    check("gradient: clicking a colour changes it", m.theme_stops(sw.pending)[0] == "#000000")
+    n = m.px(28)
+    sw._chip_click(type("E", (), {"x": n - 2, "y": 2})(), 1, n)  # the x in a chip's corner
+    check("gradient: x removes a colour", len(m.theme_stops(sw.pending)) == 3)
+    sw._set_stops(["#111111"] * 9)
+    check("gradient: at most 6 colours", len(m.theme_stops(sw.pending)) == m.MAX_STOPS)
+    sw._set_stops(["#000000", "#ff0000", "#ffffff"])
+    sw.save()
+    R.update()
+    saved = json.load(open(m.CONFIG_PATH, encoding="utf-8"))
+    check("gradient: saved and used by every effect",
+          saved["theme_stops"]["Ocean"] == ["#000000", "#ff0000", "#ffffff"]
+          and m.THEME.stops == ("#000000", "#ff0000", "#ffffff") and m.ACCENT == "#ff0000")
+    check("gradient: other themes keep their presets", m.theme_stops(app.cfg, "Violet") == m.THEMES["Violet"])
+    sw = app.settings_win
+    sw._reset_gradient()
+    sw.save()
+    R.update()
+    check("gradient: Reset brings the preset back", m.THEME.stops == m.THEMES["Ocean"])
+    sw.win.destroy()
+
+
+@step
 def open_windows_follow_theme():
     app.handle("stats")
     R.update()

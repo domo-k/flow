@@ -80,7 +80,8 @@ DEFAULTS = {
     "welcome_after_idle_minutes": 60,
     # Appearance
     "theme": "Sunset",            # a name from THEMES, or "Custom"
-    "accent": "#ff8a5c",          # used when theme is "Custom"
+    "accent": "#ff9248",          # used when theme is "Custom"
+    "theme_stops": {},            # your own gradient colours per theme, e.g. {"Ocean": ["#...", ...]}
     # Each animated element has its own effect (Off | Static | Breathe | Flow | Rainbow)
     # and speed (Slow | Medium | Fast).
     "tray_effect": "Flow",
@@ -140,7 +141,7 @@ ACCENT = ACCENT_HOVER = ACCENT_INK = CHART = FG  # set by apply_theme()
 
 # Gradient stops for each theme; the middle stop is the accent colour.
 THEMES = {
-    "Sunset": ("#ff5f6d", "#ff8a5c", "#ffc371"),
+    "Sunset": ("#ffc56e", "#ff9248", "#e2552f", "#b5446e", "#5e3a8c"),  # golden hour to twilight
     "Ocean": ("#3a7bff", "#4facfe", "#3fd8ff"),
     "Violet": ("#7f5cff", "#a98bff", "#f19cff"),
     "Rose": ("#ff3f7f", "#ff6f91", "#ffa9b8"),
@@ -216,13 +217,28 @@ def custom_stops(accent):
     return (hsv_hex(h - 0.05, s, v * 0.95), accent, hsv_hex(h + 0.05, s * 0.9, min(1, v * 1.08)))
 
 
+MAX_STOPS = 6
+
+
+def theme_stops(cfg, name=None):
+    """Gradient colours for a theme: your own list if you've edited it, otherwise the preset."""
+    name = name or cfg.get("theme")
+    edited = cfg.get("theme_stops")
+    if isinstance(edited, dict) and isinstance(edited.get(name), list):
+        own = [h for h in (valid_hex(x) if isinstance(x, str) else None for x in edited[name]) if h]
+        if len(own) >= 2:
+            return tuple(own[:MAX_STOPS])
+    if name in THEMES:
+        return THEMES[name]
+    return custom_stops(valid_hex(cfg.get("accent")) or THEMES["Sunset"][1])
+
+
 class Theme:
     """The colour palette. It never moves by itself; each animated element has its own Motion."""
 
     def __init__(self, cfg):
-        accent = valid_hex(cfg.get("accent")) or THEMES["Sunset"][1]
-        self.stops = THEMES.get(cfg.get("theme")) or custom_stops(accent)
-        self.accent = self.stops[1]
+        self.stops = theme_stops(cfg)
+        self.accent = self.stops[min(1, len(self.stops) - 1)]  # buttons and highlights
 
 
 RAINBOW = [hsv_hex(i / 12, 0.58, 1.0) for i in range(12)]
@@ -764,6 +780,8 @@ def load_config():
                        break_effect=old if saved.get("fx_break", True) else "Off", break_speed=speed)
         for old_key in ("effect", "effect_speed", "border_style", "fx_borders", "fx_break", "fx_tray"):
             cfg.pop(old_key, None)
+        if not isinstance(cfg.get("theme_stops"), dict):
+            cfg["theme_stops"] = {}
     if not cfg["ntfy_topic"]:
         # Hard-to-guess topic name: anyone who knows it can see the notifications.
         cfg["ntfy_topic"] = f"flow-{secrets.token_hex(5)}"
@@ -1971,7 +1989,7 @@ class SettingsWindow:
         "Appearance": "Colours and animations.",
         "General": "Sound, startup and the welcome screen.",
     }
-    APPEARANCE_KEYS = ("theme", "accent", "window_anim", "ring_direction", "tray_effect", "tray_speed",
+    APPEARANCE_KEYS = ("theme", "accent", "theme_stops", "window_anim", "ring_direction", "tray_effect", "tray_speed",
                        "panel_effect", "panel_speed", "break_effect", "break_speed")
 
     def __init__(self, app, tab=None):
@@ -2073,6 +2091,8 @@ class SettingsWindow:
     def _appearance(self, page, cfg):
         fx_keys = tuple(f"{p}_{k}" for p, _, _ in FX_ELEMENTS for k in ("effect", "speed"))
         self.pending = {k: cfg[k] for k in ("theme", "accent", "window_anim", "ring_direction") + fx_keys}
+        edited = cfg.get("theme_stops") if isinstance(cfg.get("theme_stops"), dict) else {}
+        self.pending["theme_stops"] = {k: list(v) for k, v in edited.items()}  # a copy we can edit
         self.fx_edge = self.fx_ring = None
 
         # 1. Colours: the palette used everywhere. It never animates on its own.
@@ -2104,6 +2124,15 @@ class SettingsWindow:
         border, self.hex_entry = text_entry(row, Theme(self.pending).accent, width=9)
         border.pack(side="right", padx=(0, px(8)))
         self.hex_entry.bind("<KeyRelease>", self._hex_typed)
+
+        row = tk.Frame(b, bg=SURFACE)
+        row.pack(fill="x", pady=(px(12), 0))
+        tk.Label(row, text="Gradient", font=font("text", 10), fg=FG, bg=SURFACE).pack(side="left")
+        self.chips = tk.Frame(row, bg=SURFACE)
+        self.chips.pack(side="right")
+        tk.Label(b, text="The colours your animations flow through. Click one to change it, + to add, \u00d7 to remove.",
+                 font=font("text", 9), fg=FAINT, bg=SURFACE, anchor="w", justify="left",
+                 wraplength=self.W - px(40)).pack(fill="x", pady=(px(6), 0))
         card.finish().pack()
 
         # 2. Animations: each element is set on its own.
@@ -2195,9 +2224,10 @@ class SettingsWindow:
 
     def refresh_swatches(self):
         for name, cv in self.swatches.items():
-            stops = THEMES.get(name) or custom_stops(valid_hex(self.pending["accent"]) or ACCENT)
+            stops = theme_stops(self.pending, name)
             cv.img = ImageTk.PhotoImage(swatch_image(px(32), stops, name == self.pending["theme"]))
             cv.itemconfig(cv.item, image=cv.img)
+        self.refresh_gradient()
         # Still preview of the chosen colours (the mark used on Flow's windows and icon).
         img = ring_mark(px(56), 1.0, list(Theme(self.pending).stops), track=SURFACE_2, glow=True,
                         bg=SURFACE)
@@ -2212,7 +2242,74 @@ class SettingsWindow:
 
     def set_custom(self, value):
         self.pending.update(theme="Custom", accent=value)
+        self.pending["theme_stops"].pop("Custom", None)  # a new custom colour gets a fresh gradient
         self.refresh_swatches()
+
+    # -- gradient editor
+
+    def refresh_gradient(self):
+        """Chips for the current theme's gradient: click to change, x to remove, + to add."""
+        for child in self.chips.winfo_children():
+            child.destroy()
+        stops = list(theme_stops(self.pending))
+        n = px(28)
+        for i, color in enumerate(stops):
+            c = tk.Canvas(self.chips, width=n, height=n, bg=SURFACE, highlightthickness=0, cursor="hand2")
+            c.pack(side="left", padx=(0, px(6)))
+            c.img = ImageTk.PhotoImage(rounded(n, n, px(7), color, SURFACE, outline=BORDER))
+            c.create_image(0, 0, anchor="nw", image=c.img)
+            if len(stops) > 2:  # remove button, shown on hover
+                k = px(13)
+                ink = max(("#15110f", "#ffffff"), key=lambda x: contrast(x, color))
+                c.x = c.create_text(n - k // 2 - 1, k // 2 + 1, text="\u00d7", fill=ink,
+                                    font=font("text_semibold", 9), state="hidden")
+                c.bind("<Enter>", lambda e, c=c: c.itemconfig(c.x, state="normal"))
+                c.bind("<Leave>", lambda e, c=c: c.itemconfig(c.x, state="hidden"))
+            c.bind("<ButtonRelease-1>", lambda e, i=i, n=n: self._chip_click(e, i, n))
+        if len(stops) < MAX_STOPS:
+            add = tk.Canvas(self.chips, width=n, height=n, bg=SURFACE, highlightthickness=0, cursor="hand2")
+            add.pack(side="left", padx=(0, px(6)))
+            add.img = ImageTk.PhotoImage(rounded(n, n, px(7), SURFACE_2, SURFACE, outline=BORDER))
+            add.create_image(0, 0, anchor="nw", image=add.img)
+            add.create_text(n // 2, n // 2, text="+", fill=FG, font=font("text_semibold", 11))
+            add.bind("<ButtonRelease-1>", lambda e: self._edit_stop(len(stops), stops[-1]))
+        if self.pending["theme"] in self.pending["theme_stops"]:
+            PillButton(self.chips, "Reset", self._reset_gradient, kind="ghost", height=28, size=9).pack(side="left")
+
+    def _chip_click(self, event, i, n):
+        stops = list(theme_stops(self.pending))
+        if len(stops) > 2 and event.x > n - px(13) and event.y < px(13):  # the x in the corner
+            del stops[i]
+            self._set_stops(stops)
+        else:
+            self._edit_stop(i, stops[i])
+
+    def _edit_stop(self, i, initial):
+        def picked(value):
+            stops = list(theme_stops(self.pending))
+            if i < len(stops):
+                stops[i] = value
+            else:
+                stops.append(value)
+            self._set_stops(stops)
+        self._open_wheel(initial, picked)
+
+    def _set_stops(self, stops):
+        self.pending["theme_stops"][self.pending["theme"]] = stops
+        self.hex_entry.delete(0, "end")
+        self.hex_entry.insert(0, Theme(self.pending).accent)
+        self.refresh_swatches()
+
+    def _reset_gradient(self):
+        self.pending["theme_stops"].pop(self.pending["theme"], None)
+        self.hex_entry.delete(0, "end")
+        self.hex_entry.insert(0, Theme(self.pending).accent)
+        self.refresh_swatches()
+
+    def _open_wheel(self, initial, on_pick):
+        if self.picker and self.picker.win.winfo_exists():
+            self.picker.win.destroy()
+        self.picker = ColorPicker(self.win, initial, on_pick)
 
     def _hex_typed(self, _e=None):
         value = valid_hex(self.hex_entry.get())
@@ -2221,14 +2318,11 @@ class SettingsWindow:
                 self.set_custom(value)
 
     def open_picker(self):
-        if self.picker and self.picker.win.winfo_exists():
-            return self.picker.win.lift()
-
         def picked(value):
             self.hex_entry.delete(0, "end")
             self.hex_entry.insert(0, value)
             self.set_custom(value)
-        self.picker = ColorPicker(self.win, Theme(self.pending).accent, picked)
+        self._open_wheel(Theme(self.pending).accent, picked)
 
     def _animate_preview(self):
         """Live preview of the selected animated element, in the chosen colours and effect."""

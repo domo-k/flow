@@ -33,8 +33,9 @@ you're away from the keyboard and mouse**. The only way through a break is to ge
 - **Welcome card** when you start or wake the laptop, with your one focus for the day and how yesterday went.
 - **Meeting mode and pause** (15 min, 30 min, 1 hour, or until you resume).
 - **Weekly stats**: breaks taken and skipped, longest sit, and how often you came back on time.
-- **Appearance**: six colour themes plus a custom colour wheel, and per-element animations (Static, Breathe, Flow,
-  Rainbow) for the tray ring, panel border and break screen.
+- **Appearance**: six colour themes (Sunset runs from golden hour to violet twilight) plus a custom colour wheel.
+  Every theme's gradient is editable, with 2 to 6 colours of your choosing. Per-element animations (Static, Breathe,
+  Flow, Rainbow) for the tray ring, panel border and break screen.
 
 <p align="center">
   <img src="docs/welcome.png" width="400" alt="Welcome card">
