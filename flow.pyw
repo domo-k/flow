@@ -1812,8 +1812,25 @@ class SessionPanel:
         self.edge = EdgeGlow(w, lambda: PANEL_FX, bg=SURFACE)
         w.bind("<Escape>", lambda e: self.close())
         w.bind("<FocusOut>", lambda e: w.after(150, self._close_if_unfocused))
-        self.opened_at = time.monotonic()
+        self.opened_at = self.last_seen = time.monotonic()
         w.focus_force()
+        self._auto_hide()
+
+    AUTO_HIDE_SECONDS = 20
+
+    def _auto_hide(self):
+        """Close by itself after 20 s; the countdown waits while the mouse is over the panel."""
+        w = self.win
+        if not w.winfo_exists():
+            return
+        now = time.monotonic()
+        px_, py_ = w.winfo_pointerxy()
+        x, y = w.winfo_rootx(), w.winfo_rooty()
+        if x <= px_ < x + w.winfo_width() and y <= py_ < y + w.winfo_height():
+            self.last_seen = now
+        if now - self.last_seen >= self.AUTO_HIDE_SECONDS:
+            return self.close()
+        w.after(500, self._auto_hide)
 
     def _close_if_unfocused(self):
         if not self.win.winfo_exists():

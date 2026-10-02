@@ -370,6 +370,31 @@ def stand_ups():
 
 
 @step
+def panel_auto_hide():
+    app.state = "working"
+    if app.panel_open():
+        app.panel.close()
+    app.panel_toggled = 0.0
+    app.handle("panel")
+    app.panel.win.unbind("<FocusOut>")
+    R.update()
+    check("panel: stays open at first", app.panel_open())
+    app.panel.last_seen -= 19
+    app.panel._auto_hide()
+    check("panel: still open just before 20 s", app.panel_open())
+    app.panel.win.event_generate("<Motion>", warp=True, x=20, y=20)  # mouse over the panel
+    R.update()
+    app.panel.last_seen -= 30
+    app.panel._auto_hide()
+    check("panel: the mouse over it keeps it open", app.panel_open())
+    app.panel.win.event_generate("<Motion>", warp=True, x=-400, y=-400)  # mouse away
+    R.update()
+    app.panel.last_seen -= 21
+    app.panel._auto_hide()
+    check("panel: hides by itself after 20 s", not app.panel_open())
+
+
+@step
 def migration():
     old = {"effect": "Gradient", "effect_speed": "Fast", "fx_tray": False, "fx_break": True,
            "border_style": "Breathe"}
