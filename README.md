@@ -27,6 +27,9 @@ you're away from the keyboard and mouse**. The only way through a break is to ge
   the nudge to your phone through [ntfy](https://ntfy.sh).
 - **Smart idle handling.** If the laptop sleeps, that counts as a break. If you're quiet for a while mid-session, Flow
   asks whether it was a break rather than guessing (useful when you're reading or watching a lecture).
+- **Works when you study away from the PC.** Turn off *Watch keyboard & mouse* (Settings → Advanced) if you also work
+  on a tablet: the session timer then always keeps running, breaks go by the clock, and the next session starts right
+  after a break.
 - **Welcome card** when you start or wake the laptop, with your one focus for the day and how yesterday went.
 - **Meeting mode and pause** (15 min, 30 min, 1 hour, or until you resume).
 - **Weekly stats**: breaks taken and skipped, longest sit, and how often you came back on time.
@@ -67,12 +70,28 @@ pyw flow.pyw --demo   # 1 min sessions / 20 s breaks, for trying it out
 
 ## Build the .exe
 
-```bash
-pip install pyinstaller
-pyinstaller --onefile --noconsole --icon flow.ico --name Flow flow.pyw
+```powershell
+.\build.ps1            # regenerates flow.ico and builds dist\Flow.exe
+.\build.ps1 -Install   # also installs it to %LOCALAPPDATA%\Programs\Flow, adds a Start menu entry and starts it
 ```
 
-The executable is written to `dist/Flow.exe`.
+`Flow.exe` is a single file with Python and every library packed inside, so it runs on PCs without Python.
+`tools/make_icon.py` draws the app icon from the same code as the in-app logo.
+
+## Tests
+
+```powershell
+py tests\run_all.py
+```
+
+| Suite | Checks |
+|---|---|
+| `test_behaviour.py` | Sessions, heads-up, break countdown, skip phrase, nudges, pause/resume, meeting mode, quiet spells and sleep, the keep-running mode, tray icon states, every animation effect, saving every Settings page, the colour picker, Advanced, themes following into open windows, and settings from older versions |
+| `test_timer.py` | The timer keeps real time, and the countdown drops exactly one second per second |
+| `test_windows.py` | In every window-animation mode, each window lands fully on screen, has a dark title bar and closes with its X; the panel, menu and popups stay inside the main screen |
+
+The tests open real Flow windows for a couple of minutes, but use throwaway settings in a temp folder, so your own
+settings, stats and startup entry are never touched.
 
 ## Licence
 
