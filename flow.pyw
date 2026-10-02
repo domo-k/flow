@@ -850,21 +850,22 @@ def _glow(size, draw_fn, blur, strength):
 
 
 def ring_mark(size, frac, colors, center=None, bg=None, track=(125, 135, 147, 110), stroke=34,
-              glow=False, tip=False):
+              glow=False, tip=False, base=256):
     """Flow's mark: a timer ring that empties clockwise as time runs out.
 
     colors: one colour or a gradient around the ring.
     center: None (the logo has no centre mark), or "pause" (two bars) for the paused tray icon.
     glow: soft halo under the ring.  tip: bright point where the ring ends.
+    base: internal drawing size (sizes below are for 256); smaller is faster, for tiny icons.
     """
     colors = _as_colors(colors)
-    S = 256
+    S, k = base, base / 256
     img = Image.new("RGBA", (S, S), bg or (0, 0, 0, 0))
-    m, t, c = (30 if glow else 14), stroke, S / 2
+    m, t, c = round((30 if glow else 14) * k), max(1, round(stroke * k)), S / 2
     box = (m, m, S - m, S - m)
     ImageDraw.Draw(img).ellipse(box, outline=track, width=t)
     if glow:
-        img.alpha_composite(_glow(S, lambda g: gradient_arc(g, box, frac, colors, t), 14, 0.8))
+        img.alpha_composite(_glow(S, lambda g: gradient_arc(g, box, frac, colors, t), 14 * k, 0.8))
     d = ImageDraw.Draw(img)
     gradient_arc(d, box, frac, colors, t)
     lead = sample(colors, 0)
@@ -872,13 +873,13 @@ def ring_mark(size, frac, colors, center=None, bg=None, track=(125, 135, 147, 11
         ang = math.radians(-90 + 360 * frac)
         rc = S / 2 - m - t / 2
         x, y = c + rc * math.cos(ang), c + rc * math.sin(ang)
-        img.alpha_composite(_glow(S, lambda g: g.ellipse((x - t, y - t, x + t, y + t), fill="#ffffff"), 10, 0.55))
+        img.alpha_composite(_glow(S, lambda g: g.ellipse((x - t, y - t, x + t, y + t), fill="#ffffff"), 10 * k, 0.55))
         d = ImageDraw.Draw(img)
         r = t * 0.3
         d.ellipse((x - r, y - r, x + r, y + r), fill=mix(sample(colors, frac), "#ffffff", 0.75))
     if center == "pause":
-        for dx in (-22, 22):
-            d.rounded_rectangle((c + dx - 11, c - 38, c + dx + 11, c + 38), radius=8, fill=lead)
+        for dx in (-22 * k, 22 * k):
+            d.rounded_rectangle((c + dx - 11 * k, c - 38 * k, c + dx + 11 * k, c + 38 * k), radius=8 * k, fill=lead)
     return img.resize((size, size), Image.LANCZOS)
 
 
@@ -1457,12 +1458,31 @@ class WelcomeWindow:
         self.app.welcome_done(choice, goal)
 
 
+_CreateIconFromResourceEx = user32.CreateIconFromResourceEx
+_CreateIconFromResourceEx.restype = ctypes.c_void_p
+_CreateIconFromResourceEx.argtypes = [ctypes.c_char_p, ctypes.c_uint, ctypes.c_int, ctypes.c_uint,
+                                      ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+
+
 class TrayIcon(pystray.Icon):
     """Tray icon whose clicks go to Flow: left = focus session panel, right = Flow's own menu."""
 
     def __init__(self, *args, on_click=None, **kwargs):
         self.on_click = on_click
         super().__init__(*args, **kwargs)
+
+    def _assert_icon_handle(self):
+        """Make the Windows icon straight from memory. (pystray writes every frame to a temp .ico
+        file and loads it back, which is slow for an animated icon.)"""
+        if self._icon_handle:
+            return
+        buf = io.BytesIO()
+        self.icon.save(buf, "PNG")
+        data = buf.getvalue()
+        handle = _CreateIconFromResourceEx(data, len(data), True, 0x00030000, 0, 0, 0x0040)  # LR_DEFAULTSIZE
+        if not handle:  # fall back to pystray's own way
+            return super()._assert_icon_handle()
+        self._icon_handle = wintypes.HICON(handle)
 
     def _on_notify(self, wparam, lparam):
         if lparam in (0x0202, 0x0205):  # WM_LBUTTONUP, WM_RBUTTONUP
@@ -2984,7 +3004,8 @@ class App:
         self.overlay.update(self.break_remaining, self.break_total, away=False)
 
     def end_break(self, skipped):
-        self.overlay.destroy()
+        if self.overlay:
+            self.overlay.destroy()
         self.overlay = None
         self.state = "working"
         self.reset_work()
@@ -3150,7 +3171,7 @@ class App:
                 self.break_remaining = self.break_total
             if self.break_remaining <= 0:
                 self.end_break(skipped=False)
-            else:
+            elif self.overlay:
                 self.overlay.update(self.break_remaining, self.break_total, away)
 
         if self.panel and self.panel.win.winfo_exists():
@@ -3192,7 +3213,7 @@ class App:
         colors, left, center, _ = frame
         if colors == "theme":
             colors = TRAY_FX.ring_colors()
-        return orient(ring_mark(64, left / self.TRAY_STEPS, colors, center=center, stroke=40))
+        return orient(ring_mark(64, left / self.TRAY_STEPS, colors, center=center, stroke=40, base=128))
 
     def run(self):
         self.root.mainloop()
