@@ -65,13 +65,59 @@ def session_cycle():
 
 @step
 def skip_phrase():
+    app.cfg["skip_style"] = "Type a phrase"
     app.start_break()
+    check("strict skipping: no skip button, a phrase box instead",
+          app.overlay.entry is not None and not buttons(app.overlay.win))
     app.overlay.entry.insert(0, "wrong words")
     app.overlay._check_phrase(None)
     check("wrong skip phrase does not end the break", app.state == "break")
     app.overlay.entry.insert(0, app.cfg["skip_phrase"].upper())
     app.overlay._check_phrase(None)
     check("correct skip phrase ends the break (any capitals)", app.state == "working")
+    app.cfg["skip_style"] = "One click"
+    app.start_break()
+    skip = [b for b in buttons(app.overlay.win)]
+    check("one-click skipping: the break screen has a Skip break button", len(skip) == 1)
+    skip[0].command()
+    check("one-click skipping: Skip break ends the break", app.state == "working")
+
+
+@step
+def skip_next_and_no_breaks():
+    m.FAKE_IDLE[0] = 1.0
+    app.state = "working"
+    app.reset_work()
+    work = app.minutes("work_minutes") * 60
+    app.handle("skip_next")
+    check("Skip next break: shows in the status", app.status_text().startswith("Session ends in"))
+    app.work_elapsed = work - app.minutes("warn_minutes_before") * 60 + 1
+    tick(app)
+    check("Skip next break: no heads-up for a break that isn't coming", not app.warned)
+    app.work_elapsed = work + 1
+    tick(app)
+    check("Skip next break: the session ends without a break screen",
+          app.state == "working" and app.overlay is None and app.work_elapsed < 3)
+    app.work_elapsed = work + 1
+    tick(app)
+    check("Skip next break: only skips one; the following break happens", app.state == "break")
+    app.end_break(skipped=True)
+    app.close_toast()
+    app.cfg["breaks_enabled"] = False
+    app.reset_work()
+    app.work_elapsed = work + 1
+    tick(app)
+    check("Screen breaks off: no break screen, the next session starts",
+          app.state == "working" and app.overlay is None and app.work_elapsed < 3)
+    app.close_stand()
+    app.sit_elapsed = app.minutes("stand_every_minutes") * 60 + 1
+    app.work_elapsed = work - 60  # a session about to end
+    tick(app)
+    check("Screen breaks off: stand-ups still come, even near the end of a session", app.stand_open())
+    app.close_stand()
+    app.sit_elapsed = 0.0
+    app.cfg["breaks_enabled"] = True
+    app.close_toast()
 
 
 @step

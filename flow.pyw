@@ -86,6 +86,8 @@ DEFAULTS = {
     # true: touching the computer restarts the break. false: it only pauses the countdown.
     "reset_break_on_input": False,
     "skip_phrase": "i really need to skip this break",
+    "breaks_enabled": True,       # off: no break screen; sessions just roll on (stand-ups still work)
+    "skip_style": "One click",    # how to skip a break: "One click" or "Type a phrase"
     # Chime when a break ends, 0-100 (0 = silent).
     "chime_volume": 8,
     # After a break: nudge me if I haven't come back to the computer.
@@ -196,7 +198,7 @@ RING_DIRECTIONS = ("Clockwise", "Counter-clockwise")
 # Animated elements: (settings key prefix, name shown in Settings, effects it offers)
 GLYPH = {"panel": "", "break": "", "stand": "", "pause": "", "play": "", "meeting": "",
          "reset": "", "settings": "", "stats": "", "quit": "", "close": "",
-         "schedule": "", "back": "", "appearance": "", "general": ""}
+         "schedule": "", "skip": "", "back": "", "appearance": "", "general": ""}
 FX_ELEMENTS = (("tray", "Tray icon", EFFECTS[1:]),
                ("panel", "Panel border", EFFECTS),
                ("break", "Break screen", EFFECTS))
@@ -1217,7 +1219,7 @@ class BreakOverlay:
     """Full-screen, always-on-top cover over every monitor. Calm on purpose: a big, light countdown,
     one slim bar, one line of status and a gentle suggestion."""
 
-    def __init__(self, root, phrase, on_skip, clock_only=False):
+    def __init__(self, root, phrase, on_skip, clock_only=False, skip_style="One click"):
         self.phrase, self.on_skip = phrase, on_skip
         vx, vy, vw, vh = virtual_screen()
         pw, ph = primary_screen()
@@ -1262,15 +1264,19 @@ class BreakOverlay:
         self.tip = c.create_text(mid, s(500), text=self.tips[0], fill=MUTED, width=s(620),
                                  justify="center", font=font("text", -s(17)))
 
-        # Emergency skip, tucked at the bottom of the primary screen.
+        # Skipping, tucked at the bottom of the primary screen: one click, or (strict) a typed phrase.
         skip = tk.Frame(w, bg=BG)
         skip.place(x=-vx + pw // 2, y=-vy + ph - s(46), anchor="s")
-        tk.Label(skip, text=f'Emergency?  Type  "{phrase}"  and press Enter',
-                 font=font("text", -s(13)), fg=FAINT, bg=BG).pack(pady=(0, s(8)))
-        border, self.entry = text_entry(skip, "", width=34, bg=BG)
-        self.entry.config(justify="center")
-        border.pack()
-        self.entry.bind("<Return>", self._check_phrase)
+        self.entry = None
+        if skip_style == "Type a phrase":
+            tk.Label(skip, text=f'Emergency?  Type  "{phrase}"  and press Enter',
+                     font=font("text", -s(13)), fg=FAINT, bg=BG).pack(pady=(0, s(8)))
+            border, self.entry = text_entry(skip, "", width=34, bg=BG)
+            self.entry.config(justify="center")
+            border.pack()
+            self.entry.bind("<Return>", self._check_phrase)
+        else:
+            PillButton(skip, "Skip break", self.on_skip, kind="ghost", bg=BG, height=36, size=10).pack()
 
         # Glowing frame around the primary screen: bright at the edge, fading inwards.
         self.edge = None
@@ -1758,6 +1764,9 @@ class TrayMenu:
                 hint=f"in {max(1, math.ceil(a.time_to_stand() / 60))} min" if a.cfg["stand_reminders"] else "")
         if a.state != "break":
             row(GLYPH["break"], "Take a break now", ("break_now",))
+        if a.state == "working" and a.cfg["breaks_enabled"]:
+            row(GLYPH["skip"], "Undo skip" if a.skip_next else "Skip next break", ("skip_next",),
+                hint="next break skipped" if a.skip_next else "")
         row(GLYPH["meeting"], "Meeting mode", ("snooze", 60), hint="1 hour")
         row(GLYPH["reset"], "Restart session timer", ("reset",))
         sep()
@@ -1983,7 +1992,8 @@ class SessionPanel:
         left = a.time_to_break()  # live, so the seconds tick over cleanly
         frac = min(1.0, max(0.0, 1 - left / work)) if work else 0
         if mode == "running":
-            status, color, sub = "FOCUS SESSION", ACCENT, "until your break"
+            status, color, sub = "FOCUS SESSION", ACCENT, ("until your break" if a.break_coming()
+                                                         else "until this session ends")
         elif mode == "snoozed":
             status, color = "MEETING MODE", WARN
             sub = f"Breaks held for {max(1, math.ceil((a.snooze_until - time.monotonic()) / 60))} more min"
@@ -2612,11 +2622,20 @@ class SettingsWindow:
         card = Card(page, self.W)
         b = card.body
         section_label(b, "Break screen")
+        self.breaks_on = setting_row(b, "Screen breaks", "Off: no break screen. Sessions roll straight into the "
+                                     "next, and stand-up reminders still keep you moving.",
+                                     lambda p: Toggle(p, cfg["breaks_enabled"]), first=True)
         self.reset = setting_row(b, "Strict mode", "Touching the computer restarts the break instead of pausing it.",
-                                 lambda p: Toggle(p, cfg["reset_break_on_input"]), first=True)
-        tk.Label(b, text="Emergency skip phrase", font=font("text", 10), fg=FG, bg=SURFACE,
+                                 lambda p: Toggle(p, cfg["reset_break_on_input"]))
+
+        def skip_choice(parent):
+            t = Tabs(parent, ("One click", "Type a phrase"), lambda v: None, bg=SURFACE, size=9, pad=20, height=30)
+            t.select(cfg["skip_style"] if cfg["skip_style"] in ("One click", "Type a phrase") else "One click")
+            return t
+        self.skip_style = setting_row(b, "Skipping a break", None, skip_choice)
+        tk.Label(b, text="Skip phrase", font=font("text", 10), fg=FG, bg=SURFACE,
                  anchor="w").pack(fill="x", pady=(px(14), 0))
-        tk.Label(b, text="Type this on the break screen to skip. Skips show up in your stats.",
+        tk.Label(b, text="Used when skipping is set to \"Type a phrase\".",
                  font=font("text", 9), fg=MUTED, bg=SURFACE, anchor="w").pack(fill="x", pady=(0, px(8)))
         border, self.phrase = text_entry(b, cfg["skip_phrase"], width=46)
         border.pack(anchor="w")
@@ -2716,6 +2735,8 @@ class SettingsWindow:
             stand_for_minutes=self.stand_for.value,
             stand_renudge_minutes=self.stand_again.value,
             skip_phrase=self.phrase.get().strip() or DEFAULTS["skip_phrase"],
+            breaks_enabled=self.breaks_on.value,
+            skip_style=self.skip_style.value or "One click",
             chime_volume=self.volume.value,
             return_nudges=self.nudges.value,
             return_grace_minutes=self.grace.value,
@@ -3049,6 +3070,7 @@ class App:
         self.stats_win = None
         self.panel = None
         self.panel_toggled = 0.0
+        self.skip_next = False          # "Skip next break" from the tray menu
         self.quiet_since = 0.0          # when a quiet spell (no input) began while working
         self.menu = None
         self.pause_until = 0.0          # 0 = paused until resumed by hand
@@ -3187,6 +3209,10 @@ class App:
             left -= max(0.0, time.monotonic() - self.last_tick)
         return max(0.0, left, self.stand_snooze_until - time.monotonic())
 
+    def break_coming(self):
+        """Will this session end in a screen break? (Not if breaks are off or the next one is skipped.)"""
+        return self.cfg["breaks_enabled"] and not self.skip_next
+
     def time_to_break(self):
         """Seconds until the break, counted live (not just at the last tick)."""
         now = time.monotonic()
@@ -3212,6 +3238,8 @@ class App:
         if now < self.snooze_until:
             return f"Meeting mode: {math.ceil((self.snooze_until - now) / 60)} min left"
         left = self.time_to_break()
+        if not self.break_coming():
+            return f"Session ends in {max(1, math.ceil(left / 60))} min"
         return f"Next break in {max(1, math.ceil(left / 60))} min" if left > 0 else "Break due"
 
     def _open_single(self, attr, cls):
@@ -3224,7 +3252,13 @@ class App:
             setattr(self, attr, cls(self))
 
     def handle(self, name, *args):
-        if name == "break_now" and self.state != "break":
+        if name == "skip_next":
+            self.skip_next = not self.skip_next
+            self.close_toast()
+            self.toast = Toast(self.root, "Next break skipped" if self.skip_next else "Next break is back on",
+                               "When this session ends, the next one starts straight away." if self.skip_next
+                               else "Your break will start when this session ends.", seconds=6)
+        elif name == "break_now" and self.state != "break":
             self.start_break()
         elif name == "snooze":
             self.snooze(args[0])
@@ -3279,8 +3313,21 @@ class App:
         warn_at = work - self.minutes("warn_minutes_before") * 60
         if now < self.snooze_until:
             return
-        if self.work_elapsed >= work:
+        if self.work_elapsed >= work and not self.cfg["breaks_enabled"]:
+            self.bump("sessions_done")
+            self.reset_work()
+            self.toast = Toast(self.root, "Session done", "Screen breaks are off, so the next session has "
+                               "started. Stand-up reminders still keep you moving.", seconds=8)
+        elif self.work_elapsed >= work and self.skip_next:
+            self.skip_next = False
+            self.bump("breaks_skipped")
+            self.reset_work()
+            self.toast = Toast(self.root, "Break skipped", "As you asked. The next session has started.",
+                               seconds=8)
+        elif self.work_elapsed >= work:
             self.start_break()
+        elif not self.cfg["breaks_enabled"] or self.skip_next:
+            pass  # no heads-up for a break that isn't coming
         elif self.work_elapsed >= warn_at and not self.warned:
             self.warned = True
             mins = math.ceil((work - self.work_elapsed) / 60)
@@ -3357,7 +3404,7 @@ class App:
             return
         if self.sit_elapsed < self.minutes("stand_every_minutes") * 60:
             return
-        if self.time_to_break() < 5 * 60:  # a screen break is about to get you up anyway
+        if self.break_coming() and self.time_to_break() < 5 * 60:  # a screen break will get you up anyway
             return
         self.close_toast()
         self.stand_nudges = 0
@@ -3410,6 +3457,7 @@ class App:
         self.state = "break"
         self.break_total = self.break_remaining = self.minutes("break_minutes") * 60
         self.overlay = BreakOverlay(self.root, self.cfg["skip_phrase"], clock_only=not self.cfg["use_activity"],
+                                    skip_style=self.cfg["skip_style"],
                                     on_skip=lambda: self.end_break(skipped=True))
         self.overlay.update(self.break_remaining, self.break_total, away=False)
 
