@@ -1,15 +1,11 @@
-# How Flow came together
+# Build process
 
-I sit too long. When I'm studying I can go two or three hours without getting out of the chair, and I only
-notice when my back starts complaining. I'd tried break-reminder apps before, and they all had the same problem:
-a little notification pops up, I click "dismiss", and I keep sitting. A reminder you can ignore isn't much of a
-reminder.
+I noticed I was sitting at my desk for way too long when studying or working. So I wanted an app that reminds me
+to get up. I'd set the timers and breaks, and if I was still sitting when a break started, it wouldn't let me
+keep working.
 
-So the idea was simple. Build something that reminds me to get up, and won't let me keep working if I'm still
-sitting there.
-
-That turned into Flow. This is how it got from that one idea to what it is now. The first half is the story and
-the thinking behind it. The second half goes into the technical side, for anyone who wants the details.
+That app is Flow. This is how it got built, from the first version to now. Part 1 is the story and why things
+work the way they do. Part 2 is the technical side.
 
 ---
 
