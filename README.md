@@ -51,6 +51,9 @@ you're away from the keyboard and mouse**. The only way through a break is to ge
 
 ## How it works
 
+For the full story of how Flow was built, the decisions behind it and the hardest bugs, see
+[docs/BUILD_STORY.md](docs/BUILD_STORY.md).
+
 | Piece | How |
 |---|---|
 | UI | Tkinter, with custom widgets (pill buttons, toggles, steppers, tabs, cards) drawn with Pillow and supersampled for smooth edges |
