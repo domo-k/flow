@@ -382,6 +382,24 @@ def orient(img):
     return ImageOps.mirror(img) if CCW else img
 
 
+_LINES = {}
+
+
+def _loop_line(colors, length):
+    """A 1-pixel strip of a looping gradient, cached: building one means thousands of colour blends,
+    which made new borders (and the Settings preview) appear a beat late."""
+    key = (colors, length)
+    if key not in _LINES:
+        if len(_LINES) > 32:
+            _LINES.clear()
+        stops = 64  # blend at 64 points, then let Pillow stretch it smoothly
+        strip = Image.new("RGB", (stops + 1, 1))
+        for i in range(stops + 1):
+            strip.putpixel((i, 0), hex_rgb(sample(colors, i / stops, loop=True)))
+        _LINES[key] = strip.resize((length, 1), Image.BILINEAR)
+    return _LINES[key]
+
+
 class EdgeGlow:
     """Animated border along the inside edges of a window (or of a rectangle on it).
 
@@ -465,10 +483,7 @@ class EdgeGlow:
             colors = motion.loop_colors()
             if self.line_key != (tuple(colors), P):
                 self.line_key = (tuple(colors), P)
-                line = Image.new("RGB", (P, 1))
-                for i in range(P):
-                    line.putpixel((i, 0), hex_rgb(sample(colors, i / P, loop=True)))
-                self.line = line
+                self.line = _loop_line(tuple(colors), P)
             line = ImageChops.offset(self.line, int(motion.phase() * P), 0)
         else:  # Static or Breathe: one colour all round
             line = Image.new("RGB", (P, 1), motion.color())
@@ -1549,6 +1564,8 @@ class StandPrompt:
         self.show_moving() if moving else self.show_ask()
         style_window(w, border=BORDER)
         self.edge = EdgeGlow(w, lambda: PANEL_FX if PANEL_FX.effect != "Off" else STATIC_FX, bg=SURFACE)
+        w.update_idletasks()
+        self.edge.render()  # border ready before the card appears
         x, y = self._spot()
         animate_in(w, x, y, rise=px(20), ms=300)
 
@@ -1845,6 +1862,8 @@ class SessionPanel:
 
         style_window(w, border=frame_border())
         self.edge = EdgeGlow(w, lambda: PANEL_FX, bg=SURFACE)
+        w.update_idletasks()
+        self.edge.render()  # border ready before the panel appears
         w.bind("<Escape>", lambda e: self.close())
         w.bind("<FocusOut>", lambda e: w.after(150, self._close_if_unfocused))
         self.opened_at = self.last_seen = time.monotonic()
@@ -2457,9 +2476,13 @@ class SettingsWindow:
             tk.Label(mini, text=spaced("Focus session"), font=font("text_semibold", 7), fg=ACCENT,
                      bg=SURFACE).place(x=px(16), y=px(12))
             tk.Label(mini, text="27:39", font=font("display_light", 14), fg=FG, bg=SURFACE).place(x=px(14), y=px(26))
-            self.fx_edge = EdgeGlow(mini, self.pending_motion, bg=SURFACE)
+            self.fx_edge = EdgeGlow(mini, self.pending_motion, bg=SURFACE, rect=(0, 0, px(250), px(58)),
+                                    radius=px(8))
+            self.fx_edge.render()
         else:
-            self.fx_edge = EdgeGlow(pv, self.pending_motion, bg=BG, thickness=px(9), glow=True)
+            self.fx_edge = EdgeGlow(pv, self.pending_motion, bg=BG, thickness=px(9), glow=True,
+                                    rect=(0, 0, self.W - px(36), px(76)))
+            self.fx_edge.render()
             mini = tk.Frame(pv, bg=BG)
             mini.place(relx=0.5, rely=0.5, anchor="center")
             tk.Label(mini, text="04:12", font=font("display_light", 16), fg=FG, bg=BG).pack()
