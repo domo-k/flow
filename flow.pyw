@@ -86,6 +86,7 @@ DEFAULTS = {
     # true: touching the computer restarts the break. false: it only pauses the countdown.
     "reset_break_on_input": False,
     "skip_phrase": "i really need to skip this break",
+    "timer_mode": "Focus sessions",  # or "Stand-ups only": no sessions or breaks, just a stand-up countdown
     "breaks_enabled": True,       # off: no break screen; sessions just roll on (stand-ups still work)
     "skip_style": "One click",    # how to skip a break: "One click" or "Type a phrase"
     # Chime when a break ends, 0-100 (0 = silent).
@@ -128,6 +129,7 @@ WELCOME_LINES = [
     "Future you is counting on present you.",
     "Motivation follows action. Begin, and it will come.",
 ]
+TIMER_MODES = ("Focus sessions", "Stand-ups only")
 PAUSE_CHOICES = (("15 min", 15), ("30 min", 30), ("1 hour", 60), ("Until I resume", None))
 WORK_CHOICES = (25, 30, 45, 50, 60, 75, 90)
 BREAK_CHOICES = (5, 10, 15, 20)
@@ -196,7 +198,7 @@ SPEEDS = {"Slow": 30.0, "Medium": 12.0, "Fast": 5.0}  # seconds per colour cycle
 WINDOW_ANIMS = ("Slide", "Fade", "None")
 RING_DIRECTIONS = ("Clockwise", "Counter-clockwise")
 # Animated elements: (settings key prefix, name shown in Settings, effects it offers)
-GLYPH = {"panel": "", "break": "", "stand": "", "pause": "", "play": "", "meeting": "",
+GLYPH = {"panel": "", "break": "", "stand": "", "pause": "", "play": "", "meeting": "",
          "reset": "", "settings": "", "stats": "", "quit": "", "close": "",
          "schedule": "", "skip": "", "back": "", "appearance": "", "general": ""}
 FX_ELEMENTS = (("tray", "Tray icon", EFFECTS[1:]),
@@ -1473,6 +1475,8 @@ class WelcomeWindow:
         info = tk.Frame(body, bg=SURFACE)
         info.pack(fill="x", pady=(px(16), 0))
         plan = f"{fmt_num(float(cfg['work_minutes']))} min focus  ·  {fmt_num(float(cfg['break_minutes']))} min breaks"
+        if cfg.get("timer_mode") == "Stand-ups only":
+            plan = f"Stand up every {fmt_num(float(cfg['stand_every_minutes']))} min  ·  no screen breaks"
         tk.Label(info, text=plan, font=font("text_semibold", 9), fg=MUTED, bg=SURFACE).pack(side="left")
         change = tk.Label(info, text="Change", font=font("text_semibold", 9), fg=ACCENT, bg=SURFACE, cursor="hand2")
         change.pack(side="left", padx=(px(10), 0))
@@ -1762,13 +1766,13 @@ class TrayMenu:
         if a.state == "working":
             row(GLYPH["stand"], "Stand up now", ("stand_now",),
                 hint=f"in {max(1, math.ceil(a.time_to_stand() / 60))} min" if a.cfg["stand_reminders"] else "")
-        if a.state != "break":
+        if a.state != "break" and not a.stand_only():
             row(GLYPH["break"], "Take a break now", ("break_now",))
-        if a.state == "working" and a.cfg["breaks_enabled"]:
+        if a.state == "working" and a.cfg["breaks_enabled"] and not a.stand_only():
             row(GLYPH["skip"], "Undo skip" if a.skip_next else "Skip next break", ("skip_next",),
                 hint="next break skipped" if a.skip_next else "")
         row(GLYPH["meeting"], "Meeting mode", ("snooze", 60), hint="1 hour")
-        row(GLYPH["reset"], "Restart session timer", ("reset",))
+        row(GLYPH["reset"], "Restart stand-up timer" if a.stand_only() else "Restart session timer", ("reset",))
         sep()
         def around(current, choices, n):
             """n choices that always include your current length (so it shows as selected)."""
@@ -1777,8 +1781,13 @@ class TrayMenu:
                 values.remove(max(values - {float(current)}, key=lambda v: abs(v - float(current))))
             return [(fmt_num(v), v) for v in sorted(values)]
 
-        chips("Focus", GLYPH["schedule"], around(a.cfg["work_minutes"], (25, 45, 50, 60, 90), 5), key="work_minutes")
-        chips("Break", GLYPH["break"], around(a.cfg["break_minutes"], BREAK_CHOICES, 4), key="break_minutes")
+        if a.stand_only():
+            chips("Stand up every", GLYPH["stand"], around(a.cfg["stand_every_minutes"], (20, 30, 45, 60), 4),
+                  key="stand_every_minutes")
+        else:
+            chips("Focus", GLYPH["schedule"], around(a.cfg["work_minutes"], (25, 45, 50, 60, 90), 5),
+                  key="work_minutes")
+            chips("Break", GLYPH["break"], around(a.cfg["break_minutes"], BREAK_CHOICES, 4), key="break_minutes")
         sep()
         row(GLYPH["panel"], "Focus session", ("panel",), hint="left-click icon")
         row(GLYPH["settings"], "Settings", ("settings",))
@@ -1942,7 +1951,7 @@ class SessionPanel:
                             wraplength=self.bar_w)
         self.sub.pack(fill="x", pady=(px(10), 0))
         self.stand_lbl = None
-        if a.cfg["stand_reminders"] and mode in ("running", "snoozed"):
+        if a.cfg["stand_reminders"] and mode in ("running", "snoozed") and not a.stand_only():
             line = tk.Frame(b, bg=SURFACE)
             line.pack(fill="x", pady=(px(8), 0))
             tk.Label(line, text=GLYPH["stand"], font=font("icons", 10), fg=MUTED, bg=SURFACE).pack(side="left")
@@ -1972,7 +1981,12 @@ class SessionPanel:
                 PillButton(chips, label, act("pause", mins), height=30, size=9).pack(side="left", padx=(0, px(6)))
             row = tk.Frame(b, bg=SURFACE)
             row.pack(fill="x", pady=(px(16), 0))
-            PillButton(row, "Take a break now", act("break_now"), kind="primary", height=36, size=9).pack(side="left")
+            if a.stand_only():
+                PillButton(row, "Stand up now", lambda: (self.close(), a.handle("stand_now")), kind="primary",
+                           height=36, size=9).pack(side="left")
+            else:
+                PillButton(row, "Take a break now", act("break_now"), kind="primary", height=36,
+                           size=9).pack(side="left")
             PillButton(row, "Settings", act("settings"), kind="ghost", height=36, size=9).pack(side="right")
         elif mode == "paused":
             row = tk.Frame(b, bg=SURFACE)
@@ -1991,7 +2005,18 @@ class SessionPanel:
         work = a.minutes("work_minutes") * 60
         left = a.time_to_break()  # live, so the seconds tick over cleanly
         frac = min(1.0, max(0.0, 1 - left / work)) if work else 0
-        if mode == "running":
+        if a.stand_only():
+            every = a.minutes("stand_every_minutes") * 60
+            left = a.time_to_stand()
+            frac = min(1.0, max(0.0, 1 - left / every)) if every else 0
+        if a.stand_only() and mode in ("running", "snoozed"):
+            if a.stand_open():
+                status, color, sub = "TIME TO STAND UP", WARN, "Get out of the chair for a minute or two."
+                left, frac = 0, 1
+            else:
+                status, color = "UNTIL YOU STAND UP", ACCENT
+                sub = f"A stand-up every {fmt_num(a.minutes('stand_every_minutes'))} min. No screen breaks."
+        elif mode == "running":
             status, color, sub = "FOCUS SESSION", ACCENT, ("until your break" if a.break_coming()
                                                          else "until this session ends")
         elif mode == "snoozed":
@@ -2009,7 +2034,7 @@ class SessionPanel:
             left, frac = 0, 1
         else:  # waiting
             status, color, sub = "NOT STARTED", MUTED, "Start a session when you're ready"
-            left, frac = work, 0
+            left, frac = (a.minutes("stand_every_minutes") * 60 if a.stand_only() else work), 0
         self.status.config(text=status, fg=color)
         self.sub.config(text=sub)
         self.clock.config(text=fmt_clock(left))
@@ -2581,6 +2606,20 @@ class SettingsWindow:
     def _schedule(self, page, cfg):
         card = Card(page, self.W)
         b = card.body
+        section_label(b, "What Flow times")
+
+        def mode_choice(parent):
+            t = Tabs(parent, TIMER_MODES, lambda v: None, bg=SURFACE, size=9, pad=20, height=30)
+            t.select(cfg["timer_mode"] if cfg["timer_mode"] in TIMER_MODES else TIMER_MODES[0])
+            return t
+        self.timer_mode = setting_row(b, "Timer", None, mode_choice, first=True)
+        tk.Label(b, text="Stand-ups only: no sessions or screen breaks. The timer counts down to your next "
+                         "stand-up (set how often on the Stand up page).", font=font("text", 9), fg=FAINT,
+                 bg=SURFACE, anchor="w", justify="left", wraplength=self.W - px(40)).pack(fill="x", pady=(px(6), 0))
+        card.finish().pack()
+
+        card = Card(page, self.W)
+        b = card.body
         section_label(b, "Durations")
         self.work = setting_row(b, "Work session", "How long you sit before a break.",
                                 lambda p: Stepper(p, cfg["work_minutes"], 5, 240, 5, "min"), first=True)
@@ -2598,7 +2637,7 @@ class SettingsWindow:
         tk.Label(b, text="Tip: scroll over a number to change it quickly. You can also change durations "
                          "from the tray icon's menu.", font=font("text", 9), fg=FAINT, bg=SURFACE,
                  anchor="w", justify="left", wraplength=self.W - px(40)).pack(fill="x", pady=(px(14), 0))
-        card.finish().pack()
+        card.finish().pack(pady=(px(12), 0))
 
     def _stand(self, page, cfg):
         card = Card(page, self.W)
@@ -2727,6 +2766,7 @@ class SettingsWindow:
         work = self.work.value
         cfg.update(
             work_minutes=work,
+            timer_mode=self.timer_mode.value or TIMER_MODES[0],
             break_minutes=self.brk.value,
             warn_minutes_before=min(self.warn.value, max(0, work - 1)),
             reset_break_on_input=self.reset.value,
@@ -3209,9 +3249,13 @@ class App:
             left -= max(0.0, time.monotonic() - self.last_tick)
         return max(0.0, left, self.stand_snooze_until - time.monotonic())
 
+    def stand_only(self):
+        """Stand-ups-only mode: no focus sessions or breaks; the timer counts down to the next stand-up."""
+        return self.cfg.get("timer_mode") == "Stand-ups only"
+
     def break_coming(self):
         """Will this session end in a screen break? (Not if breaks are off or the next one is skipped.)"""
-        return self.cfg["breaks_enabled"] and not self.skip_next
+        return self.cfg["breaks_enabled"] and not self.skip_next and not self.stand_only()
 
     def time_to_break(self):
         """Seconds until the break, counted live (not just at the last tick)."""
@@ -3237,6 +3281,10 @@ class App:
         now = time.monotonic()
         if now < self.snooze_until:
             return f"Meeting mode: {math.ceil((self.snooze_until - now) / 60)} min left"
+        if self.stand_only():
+            if self.stand_open():
+                return "Time to stand up"
+            return f"Stand up in {max(1, math.ceil(self.time_to_stand() / 60))} min"
         left = self.time_to_break()
         if not self.break_coming():
             return f"Session ends in {max(1, math.ceil(left / 60))} min"
@@ -3282,6 +3330,9 @@ class App:
                 self.panel = SessionPanel(self)
         elif name == "reset":
             self.reset_work()
+            if self.stand_only():
+                self.sit_elapsed = 0.0  # in stand-ups-only mode, the stand-up countdown is the timer
+                self.close_stand()
         elif name == "stand_now" and self.state == "working":
             self.close_stand()
             self.stand = StandPrompt(self, moving=True)
@@ -3311,7 +3362,7 @@ class App:
         """Heads-up before the break, then the break itself (unless meeting mode holds it back)."""
         work = self.minutes("work_minutes") * 60
         warn_at = work - self.minutes("warn_minutes_before") * 60
-        if now < self.snooze_until:
+        if now < self.snooze_until or self.stand_only():
             return
         if self.work_elapsed >= work and not self.cfg["breaks_enabled"]:
             self.bump("sessions_done")
@@ -3384,7 +3435,9 @@ class App:
         left = max(1, math.ceil((self.minutes("work_minutes") * 60 - self.work_elapsed) / 60))
         self.close_toast()
         if not self.panel_open():
-            self.toast = Toast(self.root, "Back to it", f"Session resumed. {left} min until your break.", seconds=6)
+            msg = (f"Next stand-up in {max(1, math.ceil(self.time_to_stand() / 60))} min." if self.stand_only()
+                   else f"Session resumed. {left} min until your break.")
+            self.toast = Toast(self.root, "Back to it", msg, seconds=6)
 
     # -- stand-ups
 
@@ -3398,7 +3451,7 @@ class App:
 
     def check_stand_due(self, now):
         """Ask you to stand up once you've sat long enough, unless something better is coming."""
-        if not self.cfg["stand_reminders"] or self.stand_open() or self.state != "working":
+        if not (self.cfg["stand_reminders"] or self.stand_only()) or self.stand_open() or self.state != "working":
             return
         if now < self.stand_snooze_until or now < self.snooze_until:  # snoozed, or meeting mode
             return
@@ -3515,8 +3568,10 @@ class App:
             self.reset_work()
             self.sit_elapsed = 0.0
             mins = fmt_num(self.minutes("work_minutes"))
+            first = (f"Next stand-up in {fmt_num(self.minutes('stand_every_minutes'))} min." if self.stand_only()
+                     else f"Next break in {mins} min.")
             self.toast = Toast(self.root, "Session started",
-                               f"Next break in {mins} min." + (f"\nFocus: {goal}" if goal else ""), seconds=6)
+                               first + (f"\nFocus: {goal}" if goal else ""), seconds=6)
         elif choice == "later":
             self.state = "waiting"
             self.welcome_again_at = time.monotonic() + 5 * 60
@@ -3684,6 +3739,17 @@ class App:
             return (WARN if blink else mix(WARN, BG, 0.55)), steps, None, blink
         if self.state == "waiting":
             return IDLE, steps, None, 0
+        if self.stand_only():
+            every = self.minutes("stand_every_minutes") * 60
+            left = round(min(1.0, self.time_to_stand() / every) * steps) if every else steps
+            if self.state == "paused":
+                return IDLE, left, "pause", 0
+            if time.monotonic() < self.snooze_until:
+                return IDLE, left, None, 0
+            if self.stand_open():
+                blink = int(time.monotonic()) % 2  # gently blinks while the stand-up card is waiting
+                return (WARN if blink else mix(WARN, BG, 0.55)), steps, None, blink
+            return "theme", left, None, fx
         work = self.minutes("work_minutes") * 60
         left = round(max(0.0, 1 - self.work_elapsed / work) * steps) if work else steps
         if self.state == "paused":

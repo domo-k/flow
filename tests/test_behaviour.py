@@ -84,6 +84,49 @@ def skip_phrase():
 
 
 @step
+def stand_ups_only():
+    m.FAKE_IDLE[0] = 1.0
+    app.cfg.update(timer_mode="Stand-ups only", stand_reminders=False)  # the mode turns stand-ups on anyway
+    app.state = "working"
+    app.reset_work()
+    app.close_stand()
+    app.sit_elapsed = 0.0
+    app.stand_snooze_until = 0.0
+    every = app.minutes("stand_every_minutes") * 60
+    app.work_elapsed = app.minutes("work_minutes") * 60 + 30  # a session would have ended by now
+    tick(app)
+    check("stand-ups only: no break screen or session end, ever",
+          app.state == "working" and app.overlay is None and app.toast is None)
+    check("stand-ups only: status counts down to the stand-up", app.status_text().startswith("Stand up in"))
+    frame = app.tray_frame()
+    check("stand-ups only: tray ring follows the stand-up countdown",
+          frame[0] == "theme" and abs(frame[1] / app.TRAY_STEPS - app.time_to_stand() / every) < 0.02)
+    app.sit_elapsed = every - 1.5
+    tick(app, 2)
+    check("stand-ups only: the stand-up card arrives on time", app.stand_open())
+    check("stand-ups only: status says it's time", app.status_text() == "Time to stand up")
+    app.stand_up()
+    app.stand_done()
+    app.close_stand()
+    check("stand-ups only: standing resets the countdown", app.sit_elapsed == 0 and app.time_to_stand() > every - 2)
+    app.handle("pause", None)
+    sat = app.sit_elapsed
+    tick(app, 2)
+    check("stand-ups only: pause freezes the stand-up countdown", app.sit_elapsed == sat)
+    app.handle("resume")
+    app.close_toast()
+    app.panel_toggled = 0
+    app.handle("panel")
+    R.update()
+    labels = [w for w in buttons(app.panel.win)]
+    check("stand-ups only: panel shows the stand-up countdown and a Stand up now button",
+          app.panel.status.cget("text") == "UNTIL YOU STAND UP" and len(labels) >= 1)
+    app.panel.close()
+    app.cfg.update(timer_mode="Focus sessions", stand_reminders=True)
+    check("back to focus sessions: breaks come again", app.break_coming())
+
+
+@step
 def skip_next_and_no_breaks():
     m.FAKE_IDLE[0] = 1.0
     app.state = "working"
