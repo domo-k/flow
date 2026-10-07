@@ -84,6 +84,29 @@ def skip_phrase():
 
 
 @step
+def ask_again_switch():
+    m.FAKE_IDLE[0] = 1.0
+    app.state = "working"
+    app.close_stand()
+    app.stand_snooze_until = app.snooze_until = 0.0
+    app.cfg["stand_renudge"] = False
+    app.sit_elapsed = app.minutes("stand_every_minutes") * 60 + 1
+    app.work_elapsed = 0
+    tick(app)
+    sent_before = len(m.sent)
+    app.stand_next_nudge = time.monotonic()
+    tick(app, 2)
+    check("ask again off: an ignored card stays quiet", app.stand_open() and app.stand.level == 0
+          and app.stand_nudges == 0 and len(m.sent) == sent_before)
+    app.cfg["stand_renudge"] = True
+    app.stand_next_nudge = time.monotonic()
+    tick(app)
+    check("ask again on: an ignored card comes back firmer", app.stand.level == 1)
+    app.close_stand()
+    app.sit_elapsed = 0.0
+
+
+@step
 def stand_ups_only():
     m.FAKE_IDLE[0] = 1.0
     app.cfg.update(timer_mode="Stand-ups only", stand_reminders=False)  # the mode turns stand-ups on anyway

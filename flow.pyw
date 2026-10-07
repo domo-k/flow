@@ -73,6 +73,7 @@ DEFAULTS = {
     "stand_reminders": True,
     "stand_every_minutes": 30,
     "stand_for_minutes": 2,
+    "stand_renudge": True,        # off: an ignored stand-up card just waits quietly
     "stand_renudge_minutes": 3,   # ask again this often if the card is ignored
     "warn_minutes_before": 5,
     # Away from the computer this long while working = you already took a break; timer resets.
@@ -2673,6 +2674,9 @@ class SettingsWindow:
                                        lambda p: Stepper(p, cfg["stand_every_minutes"], 10, 120, 5, "min"))
         self.stand_for = setting_row(b, "Move for", "A short countdown while you're on your feet.",
                                      lambda p: Stepper(p, cfg["stand_for_minutes"], 1, 10, 1, "min"))
+        self.stand_renudge = setting_row(b, "Ask again if I ignore it",
+                                         "Off: the card just waits quietly. No repeats, chimes or phone pings.",
+                                         lambda p: Toggle(p, cfg["stand_renudge"]))
         self.stand_again = setting_row(b, "Ask again after", "If the card is ignored, it comes back firmer.",
                                        lambda p: Stepper(p, cfg["stand_renudge_minutes"], 1, 15, 1, "min"))
         tk.Label(b, text="Screen breaks count as standing up. No reminder shows when a break is less than "
@@ -2797,6 +2801,7 @@ class SettingsWindow:
             stand_every_minutes=self.stand_every.value,
             stand_for_minutes=self.stand_for.value,
             stand_renudge_minutes=self.stand_again.value,
+            stand_renudge=self.stand_renudge.value,
             skip_phrase=self.phrase.get().strip() or DEFAULTS["skip_phrase"],
             breaks_enabled=self.breaks_on.value,
             skip_style=self.skip_style.value or "One click",
@@ -3728,7 +3733,8 @@ class App:
             self.check_stand_due(now)
         elif self.state != "working":
             self.close_stand()
-        if self.stand_open() and self.stand.phase == "ask" and now >= self.stand_next_nudge:
+        if (self.cfg["stand_renudge"] and self.stand_open() and self.stand.phase == "ask"
+                and now >= self.stand_next_nudge):
             self.stand_nudges += 1
             self.stand.renudge()
             self.stand_next_nudge = now + self.minutes("stand_renudge_minutes") * 60
