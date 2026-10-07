@@ -4,7 +4,6 @@
 <p align="center"><b>Focus in sessions, get up for breaks, and come back ready.</b><br>
 A Windows tray app that makes you actually take your breaks.</p>
 
-<p align="center"><a href="https://kendric.pages.dev/#work">▶ Try the live web demo</a></p>
 
 ---
 
