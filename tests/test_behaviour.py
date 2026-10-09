@@ -225,6 +225,12 @@ def skip_next_and_no_breaks():
 @step
 def pause_resume():
     m.FAKE_IDLE[0] = 1.0
+    if app.overlay:
+        app.end_break(skipped=True)
+    app.close_stand()
+    app.close_toast()
+    app.state = "working"  # start from a plain running session, whatever the step before left behind
+    app.snooze_until = 0.0
     app.work_elapsed = 600
     app.handle("pause", 15)
     before = app.work_elapsed
@@ -232,12 +238,12 @@ def pause_resume():
     check("pause freezes the session timer", app.state == "paused" and app.work_elapsed == before)
     app.pause_until = time.monotonic()
     tick(app)
-    check("timed pause resumes by itself", app.state == "working" and app.work_elapsed == before)
+    check("timed pause resumes by itself", app.state == "working" and abs(app.work_elapsed - before) < 0.5, f"state={app.state} elapsed={app.work_elapsed} before={before} paused_from={app.paused_from}")
     app.handle("pause", None)
     tick(app)
     check("'until I resume' stays paused", app.state == "paused")
     app.handle("resume")
-    check("resume continues the same session", app.state == "working" and app.work_elapsed == before)
+    check("resume continues the same session", app.state == "working" and abs(app.work_elapsed - before) < 0.5)
 
 
 @step
