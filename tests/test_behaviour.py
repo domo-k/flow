@@ -84,6 +84,37 @@ def skip_phrase():
 
 
 @step
+def tray_click_toggles():
+    app.state = "working"
+    app.panel_toggled = 0
+    app.handle("panel")
+    R.update()
+    check("left-click opens the panel", app.panel_open())
+    app.panel_toggled = 0
+    app.handle("panel")  # the click arrives while the panel is still open
+    check("left-click again hides it", not app.panel_open())
+    app.panel_toggled = 0
+    app.handle("panel")
+    R.update()
+    app.panel.opened_at -= 5
+    app.auto_closed = ("panel", time.monotonic())  # clicking the tray took focus, so it closed itself first...
+    app.panel.close()
+    app.panel_toggled = 0
+    app.handle("panel")  # ...then the click arrives
+    check("left-click again hides it, even when the panel closed itself first", not app.panel_open())
+    app.auto_closed = ("panel", time.monotonic() - 5)
+    app.panel_toggled = 0
+    app.handle("panel")
+    R.update()
+    check("a later left-click opens it again", app.panel_open())
+    app.panel.close()
+    app.auto_closed = ("menu", time.monotonic())
+    app.handle("menu", 100, 100)
+    check("right-click again hides the menu too", not (app.menu and app.menu.win.winfo_exists()))
+    app.auto_closed = (None, 0.0)
+
+
+@step
 def ask_again_switch():
     m.FAKE_IDLE[0] = 1.0
     app.state = "working"
@@ -147,11 +178,14 @@ def stand_ups_only():
     app.panel.close()
     app.cfg.update(timer_mode="Focus sessions", stand_reminders=True)
     check("back to focus sessions: breaks come again", app.break_coming())
+    app.reset_work()  # leave no overdue session behind for Flow's own timer to act on between steps
 
 
 @step
 def skip_next_and_no_breaks():
     m.FAKE_IDLE[0] = 1.0
+    if app.overlay:
+        app.end_break(skipped=True)
     app.state = "working"
     app.reset_work()
     work = app.minutes("work_minutes") * 60
@@ -163,7 +197,9 @@ def skip_next_and_no_breaks():
     app.work_elapsed = work + 1
     tick(app)
     check("Skip next break: the session ends without a break screen",
-          app.state == "working" and app.overlay is None and app.work_elapsed < 3)
+          app.state == "working" and app.overlay is None and app.work_elapsed < 3,
+          f"state={app.state} overlay={app.overlay is not None} work_elapsed={app.work_elapsed:.0f} "
+          f"skip_next={app.skip_next} mode={app.cfg.get('timer_mode')} breaks={app.cfg.get('breaks_enabled')}")
     app.work_elapsed = work + 1
     tick(app)
     check("Skip next break: only skips one; the following break happens", app.state == "break")

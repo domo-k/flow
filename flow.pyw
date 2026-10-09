@@ -1835,6 +1835,7 @@ class TrayMenu:
             self.win.focus_force()
             return
         if self.win.focus_get() is None:
+            self.app.auto_closed = ("menu", time.monotonic())
             self.close()
 
     def close(self):
@@ -1894,6 +1895,7 @@ class SessionPanel:
             self.win.focus_force()
             return
         if self.win.focus_get() is None:
+            self.app.auto_closed = ("panel", time.monotonic())
             self.close()
 
     def close(self):
@@ -3343,6 +3345,8 @@ class App:
         elif name == "resume" and self.state == "paused":
             self.resume()
         elif name == "menu":
+            if self.just_auto_closed("menu"):
+                return
             if self.menu and self.menu.win.winfo_exists():
                 self.menu.close()
             else:
@@ -3350,6 +3354,8 @@ class App:
         elif name == "panel":
             now = time.monotonic()
             if now - self.panel_toggled < 0.8:  # second click of a double-click: keep what we just did
+                return
+            if self.just_auto_closed("panel"):
                 return
             self.panel_toggled = now
             if self.panel and self.panel.win.winfo_exists():
@@ -3520,6 +3526,11 @@ class App:
         self.close_stand()
         self.stand_snooze_until = time.monotonic() + minutes * 60
         self.bump("stand_snoozes")
+
+    def just_auto_closed(self, kind):
+        """Did this popup just close itself because you clicked the tray icon? Then that click was 'hide'."""
+        closed_kind, when = getattr(self, "auto_closed", (None, 0.0))
+        return closed_kind == kind and time.monotonic() - when < 0.6
 
     def panel_open(self):
         return bool(self.panel and self.panel.win.winfo_exists())
