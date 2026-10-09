@@ -1823,7 +1823,7 @@ class TrayMenu:
         my = min(max(top + px(8), my), bottom - mh - px(8))
         style_window(w, border=BORDER)
         w.bind("<Escape>", lambda e: self.close())
-        w.bind("<FocusOut>", lambda e: w.after(150, self._close_if_unfocused))
+        w.bind("<FocusOut>", lambda e: w.after(60, self._close_if_unfocused))
         self.opened_at = time.monotonic()
         animate_in(w, mx, my, rise=-px(10) if below else px(10), ms=160)
         w.focus_force()
@@ -1831,7 +1831,7 @@ class TrayMenu:
     def _close_if_unfocused(self):
         if not self.win.winfo_exists():
             return
-        if time.monotonic() - self.opened_at < 0.6:
+        if time.monotonic() - self.opened_at < 0.4:
             self.win.focus_force()
             return
         if self.win.focus_get() is None:
@@ -1867,7 +1867,7 @@ class SessionPanel:
         w.update_idletasks()
         self.edge.render()  # border ready before the panel appears
         w.bind("<Escape>", lambda e: self.close())
-        w.bind("<FocusOut>", lambda e: w.after(150, self._close_if_unfocused))
+        w.bind("<FocusOut>", lambda e: w.after(60, self._close_if_unfocused))
         self.opened_at = self.last_seen = time.monotonic()
         w.focus_force()
         self._auto_hide()
@@ -1891,7 +1891,7 @@ class SessionPanel:
     def _close_if_unfocused(self):
         if not self.win.winfo_exists():
             return
-        if time.monotonic() - self.opened_at < 1.0:  # clicks on the tray icon just after opening
+        if time.monotonic() - self.opened_at < 0.4:  # the second click of a double-click
             self.win.focus_force()
             return
         if self.win.focus_get() is None:
@@ -3165,6 +3165,17 @@ class App:
             self.root.after(800, self.show_welcome)
         self.root.after(1000, self.tick)
         self.root.after(200, self.animate_fx)
+        self.root.after(25, self.poll_clicks)
+
+    def poll_clicks(self):
+        """Handle tray clicks quickly, so opening and hiding the panel feels instant."""
+        if self.quitting:
+            return
+        while not self.cmds.empty():
+            self.handle(*self.cmds.get())
+            if self.quitting:
+                return
+        self.root.after(25, self.poll_clicks)
 
     def refresh_window_icons(self):
         # Several sizes so the taskbar and title bar both get a sharp icon; follows the theme.
@@ -3353,7 +3364,7 @@ class App:
                 self.menu = TrayMenu(self, *args)
         elif name == "panel":
             now = time.monotonic()
-            if now - self.panel_toggled < 0.8:  # second click of a double-click: keep what we just did
+            if now - self.panel_toggled < 0.4:  # second click of a double-click: keep what we just did
                 return
             if self.just_auto_closed("panel"):
                 return
