@@ -179,10 +179,10 @@ TIPS = [
 ]
 
 # Palette. Neutrals are fixed; the accent colours come from the theme (see apply_theme).
-BG, SURFACE, SURFACE_2, BORDER = "#0e1116", "#171b22", "#1f252e", "#2a313b"
-FG, MUTED, FAINT = "#eef1f4", "#8b95a1", "#5b6570"
+BG, SURFACE, SURFACE_2, BORDER = "#0a0a0a", "#141414", "#1e1e1e", "#2a2a2a"
+FG, MUTED, FAINT = "#f0f0f0", "#959595", "#5e5e5e"
 WARN, IDLE = "#f2b84b", "#7d8793"
-SIDEBAR = "#12161c"
+SIDEBAR = "#0f0f0f"
 ACCENT = ACCENT_HOVER = ACCENT_INK = CHART = FG  # set by apply_theme()
 
 # Gradient stops for each theme; the middle stop is the accent colour.
@@ -977,16 +977,16 @@ def app_logo(size):
     # Tile: soft vertical gradient, rounded, with a faint rim.
     grad = Image.new("RGBA", (1, S))
     for y in range(S):
-        grad.putpixel((0, y), hex_rgb(mix("#1e252f", "#0a0d11", y / (S - 1))) + (255,))
+        grad.putpixel((0, y), hex_rgb(mix("#202020", "#0a0a0a", y / (S - 1))) + (255,))
     grad = grad.resize((S, S))
     mask = Image.new("L", (S, S), 0)
     ImageDraw.Draw(mask).rounded_rectangle((6, 6, S - 6, S - 6), radius=60, fill=255)
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     img.paste(grad, (0, 0), mask)
-    ImageDraw.Draw(img).rounded_rectangle((6, 6, S - 6, S - 6), radius=60, outline="#2c3440", width=3)
+    ImageDraw.Draw(img).rounded_rectangle((6, 6, S - 6, S - 6), radius=60, outline="#303030", width=3)
     small = size <= 32
     r = 214 if small else 190  # bolder ring at tiny sizes so it stays readable
-    ring = orient(ring_mark(r, 1.0, list(THEME.stops), track="#242b35",
+    ring = orient(ring_mark(r, 1.0, list(THEME.stops), track="#262626",
                             stroke=46 if small else 30, glow=not small))
     img.alpha_composite(ring, ((S - r) // 2, (S - r) // 2))
     return img.resize((size, size), Image.LANCZOS)
